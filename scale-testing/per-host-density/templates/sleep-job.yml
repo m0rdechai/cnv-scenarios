@@ -7,7 +7,8 @@ spec:
     spec:
       containers:
       - name: sleep-container
-        image: busybox:1.35
+        # Using Red Hat registry to avoid Docker Hub rate limiting
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
         command: ["sleep", "{{.sleepDuration}}"]
       restartPolicy: Never
   backoffLimit: 0

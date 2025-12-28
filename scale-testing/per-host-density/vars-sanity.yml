@@ -37,6 +37,10 @@ counter: 1
 max-iterations: 1
 cleanup: true
 
+# VM Lifecycle Skip Options
+skipVmShutdown: false                  # Set to true to skip VM shutdown phase
+skipVmRestart: false                   # Set to true to skip VM restart/startup phase
+
 # SSH Configuration for VM Access
 privateKey: '/home/kni/.ssh/id_rsa'
 publicKey: '/home/kni/.ssh/id_rsa.pub'

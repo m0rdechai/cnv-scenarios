@@ -124,6 +124,23 @@ get_vars_file() {
     fi
 }
 
+# Read a value from a YAML file
+# Usage: get_yaml_value "key" "vars_file" "default_value"
+get_yaml_value() {
+    local key="$1"
+    local file="$2"
+    local default="$3"
+    
+    if [[ -f "$file" ]]; then
+        local value=$(grep "^${key}:" "$file" 2>/dev/null | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+        if [[ -n "$value" ]]; then
+            echo "$value"
+            return
+        fi
+    fi
+    echo "$default"
+}
+
 # Parse test registry entry
 parse_registry() {
     local entry="$1"
@@ -190,10 +207,16 @@ get_validation_info() {
 # =============================================================================
 
 # Setup for per-host-density test
+# Args: $1 = vars file path
 setup_per_host_density() {
-    local scale_mode="${scaleMode:-single-node}"
-    local vms_per_ns="${vmsPerNamespace:-450}"
-    local ns_count="${namespaceCount:-1}"
+    local vars_file="$1"
+    
+    # Read values: CLI env var takes precedence, then vars file, then default
+    local scale_mode="${scaleMode:-$(get_yaml_value "scaleMode" "$vars_file" "single-node")}"
+    local vms_per_ns="${vmsPerNamespace:-$(get_yaml_value "vmsPerNamespace" "$vars_file" "10")}"
+    local ns_count="${namespaceCount:-$(get_yaml_value "namespaceCount" "$vars_file" "1")}"
+    local pct_validate="${percentage_of_vms_to_validate:-$(get_yaml_value "percentage_of_vms_to_validate" "$vars_file" "25")}"
+    local ssh_retries="${max_ssh_retries:-$(get_yaml_value "max_ssh_retries" "$vars_file" "8")}"
     
     # Auto-select first worker if single-node mode with no targetNode
     if [[ "$scale_mode" != "multi-node" ]] && [[ -z "$targetNode" ]]; then
@@ -221,8 +244,8 @@ setup_per_host_density() {
     fi
     log ""
     log "Validation Configuration:"
-    log "  percentage_of_vms_to_validate=${percentage_of_vms_to_validate:-25}%"
-    log "  max_ssh_retries=${max_ssh_retries:-8}"
+    log "  percentage_of_vms_to_validate=${pct_validate}%"
+    log "  max_ssh_retries=${ssh_retries}"
     log ""
     
     return 0
@@ -275,18 +298,67 @@ setup_nic_hotplug() {
 }
 
 # Dispatcher for test-specific setup
+# Args: $1 = test_name, $2 = vars_file
 run_setup() {
     local test_name="$1"
+    local vars_file="$2"
     
     case "$test_name" in
         per-host-density)
-            setup_per_host_density
+            setup_per_host_density "$vars_file"
             ;;
         nic-hotplug)
             setup_nic_hotplug
             ;;
         *)
             # No special setup needed
+            return 0
+            ;;
+    esac
+}
+
+# =============================================================================
+# TEST-SPECIFIC CLEANUP FUNCTIONS
+# =============================================================================
+
+# Cleanup for per-host-density test
+# Args: $1 = vars file path
+cleanup_per_host_density() {
+    local vars_file="$1"
+    
+    # Check if cleanup is enabled (CLI env var takes precedence, then vars file)
+    local do_cleanup="${cleanup:-$(get_yaml_value "cleanup" "$vars_file" "true")}"
+    
+    if [[ "$do_cleanup" == "true" ]]; then
+        logmain INFO "[per-host-density] Cleanup enabled - deleting test namespaces..."
+        
+        # Delete namespaces with the test label
+        local deleted_count=$(kubectl delete ns -l kube-burner.io/test-name=per-host-density --wait=false 2>/dev/null | wc -l || echo "0")
+        
+        if [[ "$deleted_count" -gt 0 ]]; then
+            logmain INFO "[per-host-density] Initiated deletion of namespaces (running in background)"
+        else
+            logmain INFO "[per-host-density] No test namespaces found to delete"
+        fi
+    else
+        logmain INFO "[per-host-density] Cleanup disabled - namespaces preserved"
+    fi
+    
+    return 0
+}
+
+# Dispatcher for test-specific cleanup
+# Args: $1 = test_name, $2 = vars_file
+run_cleanup() {
+    local test_name="$1"
+    local vars_file="$2"
+    
+    case "$test_name" in
+        per-host-density)
+            cleanup_per_host_density "$vars_file"
+            ;;
+        *)
+            # No special cleanup needed
             return 0
             ;;
     esac
@@ -364,8 +436,8 @@ run_single_test() {
     log "Mode: ${MODE}"
     log "Results: ${results_path}/"
     
-    # Run test-specific setup
-    if ! run_setup "$test_name"; then
+    # Run test-specific setup (pass temp_vars for reading config values)
+    if ! run_setup "$test_name" "$temp_vars"; then
         logerr "[$test_name] Setup failed"
         TEST_RESULTS[$test_name]=1
         TEST_DURATIONS[$test_name]=0
@@ -433,6 +505,9 @@ run_single_test() {
         duration_seconds: $duration,
         timestamp: $timestamp
       }' > "$summary_json"
+    
+    # Run test-specific cleanup (e.g., delete namespaces if cleanup=true)
+    run_cleanup "$test_name" "$temp_vars"
     
     # Print test footer
     log ""

@@ -11,7 +11,7 @@ Before running tests, ensure you have the following installed and configured:
 | **kube-burner** | Test execution engine | [kube-burner releases](https://github.com/kube-burner/kube-burner/releases) |
 | **jq** | JSON processing for validation and summary | `dnf install jq` or `brew install jq` |
 | **sshpass** | Password-based SSH (minimal-resources test) | `dnf install sshpass` |
-| **oc** or **kubectl** | Kubernetes CLI | [OpenShift CLI](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) |
+| **oc** and **kubectl** | Kubernetes CLI | [OpenShift CLI](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) |
 | **OpenShift Virtualization** | CNV operator | Installed on cluster |
 | **Storage Class** | PVC provisioning | Configured (default: `ocs-storagecluster-ceph-rbd`) |
 | **SSH Keys** | VM access validation | Paths in vars files must be valid and accessible |
@@ -338,6 +338,12 @@ namespaceCount=2 vmsPerNamespace=400 targetNode=worker001 ./run-workloads.sh per
 
 # Multiple namespaces, multi-node (1200 VMs across workers)
 scaleMode=multi-node namespaceCount=3 vmsPerNamespace=400 ./run-workloads.sh per-host-density
+
+# Preserve namespaces for debugging (disable cleanup)
+cleanup=false ./run-workloads.sh per-host-density --mode sanity
+
+# Skip VM shutdown/restart phases (only test VM creation)
+skipVmShutdown=true skipVmRestart=true ./run-workloads.sh per-host-density
 ```
 
 **Scale Mode Options:**
@@ -354,10 +360,11 @@ scaleMode=multi-node namespaceCount=3 vmsPerNamespace=400 ./run-workloads.sh per
 **Test Phases:**
 1. Create VMs (running) with SSH secret
 2. Validate running state + SSH accessibility
-3. Shutdown all VMs in batches
-4. Validate shutdown state
-5. Restart all VMs
-6. Validate running state + SSH accessibility
+3. Shutdown all VMs (skipped if `skipVmShutdown=true`)
+4. Validate shutdown state (skipped if `skipVmShutdown=true`)
+5. Restart all VMs (skipped if `skipVmRestart=true`)
+6. Validate running state + SSH accessibility (skipped if `skipVmRestart=true`)
+7. Cleanup namespaces (skipped if `cleanup=false`)
 
 **Validation Configuration:**
 - `percentage_of_vms_to_validate=25`: Percentage of VMs randomly selected for SSH validation
@@ -772,6 +779,12 @@ oc delete ns -l 'kube-burner.io/test-name=<test-name>'
 
 # Using counter=0 (triggers cleanup job)
 counter=0 ./run-workloads.sh cpu-limits
+
+# Per-host-density: disable cleanup to preserve namespaces
+cleanup=false ./run-workloads.sh per-host-density --mode sanity
+
+# Per-host-density: manually cleanup after inspection
+oc delete ns -l 'kube-burner.io/test-name=per-host-density'
 ```
 
 ## Troubleshooting
@@ -820,7 +833,7 @@ oc get vmis -n <namespace>
 | Resource Limits | Disk | disk-limits-test.yml | `diskCount=4 diskSize=100Gi` |
 | Hot-plug | Disks | disk-hotplug-test.yml | `diskCount=256 pvcSize=1Gi` |
 | Hot-plug | NICs | nic-hotplug-test.yml | `nicCount=28` |
-| Scale | Per-Host | per-host-density.yml | `vmsPerNamespace=460 scaleMode=single-node` |
+| Scale | Per-Host | per-host-density.yml | `vmsPerNamespace=460 scaleMode=single-node cleanup=true` |
 | Scale | Capacity | virt-capacity-benchmark.yml | `vmCount=5 percentage_of_vms_to_validate=25` |
 | Performance | Large Disk | large-disk-performance.yml | `largeDiskSize=100Ti` |
 | Performance | High Memory | high-memory-performance.yml | `highMemory=450Gi` |
