@@ -52,8 +52,8 @@ vmsPerNamespace: 30                   # Number of VMs to create per namespace
 # Note: vmsPerHost is deprecated - use vmsPerNamespace instead
 vmUser: alpine                          # SSH username for Alpine Linux VMs
 # Storage Configuration
-sourceStorageSize: 5120                  # Source DataVolume size in MiB for VM cloning
-vmStorageSize: 5120                      # Individual VM disk size in MiB
+sourceStorageSize: 256                   # Source DataVolume size in MiB for VM cloning
+vmStorageSize: 256                       # Individual VM disk size in MiB
 storageClassName: ocs-storagecluster-ceph-rbd  # Storage class for PVC provisioning
 
 # VM Resource Allocation
