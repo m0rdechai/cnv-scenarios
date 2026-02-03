@@ -1,6 +1,8 @@
 # CNV Scenarios - Kube-Burner
 
-This repository contains test scenarios for OpenShift Virtualization (CNV) workloads
+This repository contains perf and scale qe scenarios for OpenShift Virtualization (CNV) workloads.
+
+Some of the flows in this repository are inspired by, or in cases such as [virt-capacity-benchmark](https://kube-burner.github.io/kube-burner-ocp/latest/) derived from existing workflows in [kube-burner-ocp](https://github.com/kube-burner/kube-burner-ocp/tree/main) modified to meet regression aims for perf/scale qe.
 
 ## Requirements
 
@@ -377,6 +379,9 @@ skipVmShutdown=true skipVmRestart=true ./run-workloads.sh per-host-density
 
 
 ### Virt-Capacity-Benchmark
+
+Note that this flow is a modified version of [virt-capacity-benchmark](https://kube-burner.github.io/kube-burner-ocp/latest/)
+This modified version of the virt-capacity-benchmark preserves the same overall workflow, but adds targeted validations to support regression aims. Like most of the flows here, it is heavily inspired by, and in many cases derived from, workflows that originated in kube-burner-ocp.
 
 Comprehensive capacity testing with volume resize, VM restart, snapshot, and migration operations. Includes percentage-based SSH validation and structured JSON reporting.
 
