@@ -20,11 +20,6 @@
 {{- $namespacePrefix := .testNamespacePrefix | default "per-host-density-test" -}}
 {{- $nsName := $namespacePrefix -}}
 ---
-global:
-  measurements:
-  - name: vmiLatency
-  - name: pvcLatency
-
 metricsEndpoints:
 - indexer:
     type: local
@@ -90,6 +85,10 @@ jobs:
   objects:
   - objectTemplate: source-datavolume.yml
     replicas: 1
+    waitOptions:
+      customStatusPaths:
+      - key: '.status.phase'
+        value: 'Succeeded'
     inputVars:
       name: per-host-source
       storage: {{ $sourceStorageSizeStr }}
@@ -100,6 +99,9 @@ jobs:
 # Create VMs - supports single-node or multi-node distribution
 - name: create-vms
   jobType: create
+  measurements:
+  - name: vmiLatency
+  - name: pvcLatency
   jobIterations: {{ $namespaceCount }}
   qps: {{ .qpsCreate }}
   burst: {{ .burstCreate }}

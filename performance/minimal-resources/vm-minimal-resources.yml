@@ -9,7 +9,7 @@ metadata:
   {{end}}
   name: {{.name}}-{{.Replica}}
 spec:
-  running: {{.VMIrunning}}
+  runStrategy: {{ if .VMIrunning }}Always{{ else }}Halted{{ end }}
   template:
     metadata:
       labels:

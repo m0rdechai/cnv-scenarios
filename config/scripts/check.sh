@@ -179,7 +179,7 @@ check_vm_shutdown() {
     
     # Check if VMs are in Stopped state
     local total_vms=$(oc get vm -n "${namespace}" -l "${label_key}=${label_value}" --no-headers | wc -l)
-    local stopped_vms=$(oc get vm -n "${namespace}" -l "${label_key}=${label_value}" -o jsonpath='{.items[?(@.spec.running==false)].metadata.name}' | wc -w)
+    local stopped_vms=$(oc get vm -n "${namespace}" -l "${label_key}=${label_value}" -o jsonpath='{.items[?(@.spec.runStrategy=="Halted")].metadata.name}' | wc -w)
     
     echo "Total VMs: ${total_vms}, Stopped VMs: ${stopped_vms}"
     

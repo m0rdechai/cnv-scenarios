@@ -383,7 +383,7 @@ function check_vm_shutdown() {
     # Shutdown State Check
     local shutdown_check_start=$(date +%s)
     local stopped_vms
-    stopped_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" -o jsonpath='{.items[?(@.spec.running==false)].metadata.name}' | wc -w)
+    stopped_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" -o jsonpath='{.items[?(@.spec.runStrategy=="Halted")].metadata.name}' | wc -w)
     local shutdown_check_duration=$(( $(date +%s) - shutdown_check_start ))
     
     echo "Stopped VMs: ${stopped_vms}/${total_vms}"

@@ -206,7 +206,7 @@ jobs:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
     waitOptions:
       customStatusPaths:
-      - key: '(.conditions.[] | select(.type == "Ready")).status'
+      - key: '((.conditions // [])[] | select(.type == "Ready")).status'
         value: "True"
       labelSelector:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
