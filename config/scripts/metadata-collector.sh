@@ -214,6 +214,12 @@ if [[ -n "$VARS_FILE" && -f "$VARS_FILE" ]]; then
     if [[ -z "$tc_cpuCores" || "$tc_cpuCores" == "0" ]]; then
         tc_cpuCores=$(get_yaml_value "minCpu" "$VARS_FILE" "0")
     fi
+    # Normalize Kubernetes CPU quantities (e.g. "100m" → 100) to integer for ES long mapping
+    tc_cpuCores="${tc_cpuCores%\"}"
+    tc_cpuCores="${tc_cpuCores#\"}"
+    if [[ "$tc_cpuCores" =~ ^[0-9]+m$ ]]; then
+        tc_cpuCores="${tc_cpuCores%m}"
+    fi
 
     tc_memory=$(get_yaml_value "memory" "$VARS_FILE" "")
     if [[ -z "$tc_memory" ]]; then
