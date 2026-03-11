@@ -19,6 +19,13 @@ This document describes the internal architecture of the CNV test scenarios, foc
   - [Local Scripts](#local-scripts-scale-testing)
   - [How beforeCleanup Works](#how-beforecleanup-works)
 - [Adding a New Scenario](#adding-a-new-scenario)
+- [Observability Pipeline](#observability-pipeline)
+  - [Data Flow Overview](#data-flow-overview)
+  - [Metadata Collector](#metadata-collector)
+  - [Validation Indexer](#validation-indexer)
+  - [Alert Collector](#alert-collector)
+  - [Elasticsearch Index Structure](#elasticsearch-index-structure)
+  - [Grafana Dashboards](#grafana-dashboards)
 
 ---
 
@@ -390,4 +397,129 @@ my-scenario)
 ```
 
 ---
+
+## Observability Pipeline
+
+The test suite includes an end-to-end observability pipeline that flows data from test execution through Elasticsearch into Grafana dashboards.
+
+### Architecture Diagram
+
+An interactive Excalidraw diagram of the full pipeline is available at [`config/grafana/cnv-observability-architecture.excalidraw`](config/grafana/cnv-observability-architecture.excalidraw). Open it in [excalidraw.com](https://excalidraw.com) or any compatible viewer.
+
+### Data Flow Overview
+
+```
+run-workloads.sh
+  │
+  ├─ kube-burner init ──────────────────┐
+  │   ├─ Creates VMs, DVs, PVCs         │
+  │   ├─ Runs beforeCleanup validation  │
+  │   ├─ Collects Prometheus metrics ────┼──► ES: cnv-<testName>  (per-test metrics index)
+  │   └─ Writes local JSON results      │
+  │                                      │
+  ├─ metadata-collector.sh ─────────────┼──► ES: cnv-metadata     (cluster + test metadata)
+  │   └─ Gathers cluster info, operator │    ES: cnv-<testName>  (duplicate for per-test queries)
+  │      versions, node specs, vars     │
+  │                                      │
+  ├─ validation-indexer.sh ─────────────┼──► ES: cnv-validation   (structured pass/fail reports)
+  │   └─ Indexes validation-*.json      │
+  │      from results directory         │
+  │                                      │
+  └─ alert-collector.sh ────────────────┼──► ES: cnv-alerts       (Prometheus alerts during test)
+      └─ Queries Prometheus /api/v1/    │
+         alerts for the test window     │
+                                        │
+                          Elasticsearch ─┘
+                                │
+                          Grafana Dashboards
+                           ├─ Fleet Overview
+                           ├─ Run Explorer
+                           ├─ Run Detail
+                           ├─ Run Comparison
+                           └─ VM Startup Performance
+```
+
+### Metadata Collector
+
+**Script:** `config/scripts/metadata-collector.sh`
+
+Runs after each test completes. Collects comprehensive metadata about the test environment and indexes it to Elasticsearch.
+
+**Data collected:**
+
+| Category | Fields | Source |
+|----------|--------|--------|
+| Test info | uuid, testName, testMode, runTimestamp, testResult, exitCode, durationSeconds | kube-burner summary + run-workloads.sh |
+| Cluster | ocpVersion, clusterId, platform, apiUrl, networkType | `oc get clusterversion`, `oc get infrastructure` |
+| Nodes | total, masters, workers, per-worker CPU/memory/architecture | `oc get nodes` with capacity parsing |
+| Operators | cnvVersion, hcoVersion, odfVersion, sriovVersion, nmstateVersion | `oc get csv` in relevant namespaces |
+| Storage | defaultClass, all storage classes with provisioner/reclaimPolicy | `oc get sc` |
+| Test config | vmCount, cpuCores, memory, storage, storageClassName | Parsed from the processed vars file |
+| Runtime config | All key-value pairs from vars file (sensitive fields filtered) | python3/pyyaml with grep/awk fallback |
+
+**Fallback chains for testConfig fields:**
+
+```
+cpuCores:  cpuCores → vmCpuRequest → vmCpuCores → minCpu
+memory:    memory → memorySize → highMemory → minMemory → vmMemory
+storage:   storage → rootStorage → largeDiskSize → diskSize → minStorage → storageSize
+vmCount:   vmCount → vmsPerNamespace
+```
+
+**Quantity normalization:** Kubernetes CPU quantities (e.g., `"100m"`) are stripped of the `m` suffix to produce integer values compatible with ES `long` mappings.
+
+### Validation Indexer
+
+**Script:** `config/scripts/validation-indexer.sh`
+
+Finds all `validation-*.json` files in the test results directory and indexes each one to the `cnv-validation` ES index. Adds `uuid`, `testName`, and `runTimestamp` fields to each document.
+
+Called by `run-workloads.sh` with `--test-name` to override any testName embedded in the JSON (which can be unreliable — see `lessons_learned.md` lesson #9).
+
+### Alert Collector
+
+**Script:** `config/scripts/alert-collector.sh`
+
+Queries the Prometheus `/api/v1/alerts` endpoint during the test's time window and produces a structured JSON document with:
+
+- `alertsSummary`: totalFiring, totalPending, counts by severity
+- `alerts[]`: individual alert details (name, severity, state, labels, annotations)
+
+Indexed to the `cnv-alerts` ES index for correlation with test results.
+
+### Elasticsearch Index Structure
+
+| Index Pattern | Content | Created By |
+|---------------|---------|------------|
+| `cnv-metadata` | Cluster metadata, operator versions, test config | metadata-collector.sh |
+| `cnv-<testName>` | kube-burner metrics (VMI latency, PVC latency, node metrics, Ceph, etc.) | kube-burner (Prometheus scrape + local indexer) |
+| `cnv-validation` | Structured validation pass/fail reports | validation-indexer.sh |
+| `cnv-alerts` | Prometheus alerts active during each test | alert-collector.sh |
+
+All documents share a common `uuid` field (kube-burner's run UUID) for cross-index correlation.
+
+### Grafana Dashboards
+
+Five v2 dashboards are stored as JSON in `config/grafana/` and deployed to Grafana via the import API.
+
+| Dashboard | File | Purpose |
+|-----------|------|---------|
+| **Fleet Overview** | `cnv-fleet-overview-v2.json` | KPIs across all runs: success rate, duration trends, version matrix, workload profile |
+| **Run Explorer** | `cnv-run-explorer-v2.json` | Searchable table of all runs with filters for workload, CNV version, storage class |
+| **Run Detail** | `cnv-run-detail-v2.json` | Deep dive into a single run: VMI latency waterfall, PVC latency, node metrics, runtime config, alerts |
+| **Run Comparison** | `cnv-run-comparison-v2.json` | Side-by-side comparison of two runs: environment diff, config diff, metric overlay |
+| **VM Startup Performance** | `cnv-vm-startup-performance.json` | VM lifecycle analysis: startup waterfall, per-node breakdown, KubeVirt control plane, Ceph/ODF metrics |
+
+**Dashboard datasources:**
+
+| Datasource | Type | Index Pattern | Used By |
+|------------|------|---------------|---------|
+| `cnv-es` | Elasticsearch | `cnv-metadata` | Fleet Overview, Run Explorer, Run Detail, Run Comparison |
+| `cnv-metrics` | Elasticsearch | `cnv-*` | Run Detail (metrics panels), VM Startup Performance |
+| `cnv-alerts` | Elasticsearch | `cnv-alerts` | Run Detail (alerts section), VM Startup Performance |
+| `cnv-validation` | Elasticsearch | `cnv-validation` | Run Detail, Run Comparison (validation panels) |
+
+**Deployment:** Dashboards use `__inputs` template variables for datasource references. They must be deployed via Grafana's `/api/dashboards/import` endpoint (not `/api/dashboards/db`) with an `inputs` mapping that resolves `DS_CNV_ES`, `DS_CNV_METRICS`, `DS_CNV_ALERTS`, and `DS_CNV_VALIDATION` to actual datasource UIDs.
+
+**Alert rules** (`config/grafana/alerting/cnv-alert-rules.json`) define four Grafana alerts: test failure, duration regression, validation failure, and VM startup degradation.
 

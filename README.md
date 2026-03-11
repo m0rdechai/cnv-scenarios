@@ -773,6 +773,34 @@ minimal-resources, large-disk, high-memory
 per-host-density, virt-capacity-benchmark
 ```
 
+## Observability and Dashboards
+
+When `esServer` is configured in the vars file, the test suite indexes structured data to Elasticsearch and visualizes it through five Grafana dashboards.
+
+### Data Pipeline
+
+After each test, `run-workloads.sh` runs three post-processing scripts:
+
+| Script | ES Index | What It Captures |
+|--------|----------|------------------|
+| `metadata-collector.sh` | `cnv-metadata` | Cluster info (OCP/CNV/ODF versions, node specs), test config, runtime vars |
+| `validation-indexer.sh` | `cnv-validation` | Structured pass/fail reports from each validation phase |
+| `alert-collector.sh` | `cnv-alerts` | Prometheus alerts active during the test window |
+
+kube-burner itself indexes metrics (VMI latency, PVC latency, node/Ceph metrics) to per-test `cnv-<testName>` indices via its Prometheus scrape + ES indexer.
+
+### Grafana Dashboards
+
+| Dashboard | Purpose |
+|-----------|---------|
+| **Fleet Overview** | KPIs across all runs — success rate, duration trends, version matrix |
+| **Run Explorer** | Searchable table of all runs with workload/version/storage filters |
+| **Run Detail** | Deep dive: VMI latency waterfall, node metrics, runtime config, alerts |
+| **Run Comparison** | Side-by-side: environment diff, config diff, metric overlay |
+| **VM Startup Performance** | VM lifecycle analysis with KubeVirt control plane and Ceph metrics |
+
+Dashboard JSON files are in `config/grafana/`. See [ARCHITECTURE.md](ARCHITECTURE.md#observability-pipeline) for deployment instructions and datasource configuration.
+
 ## Cleanup
 
 ```bash
