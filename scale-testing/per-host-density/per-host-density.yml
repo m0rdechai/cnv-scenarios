@@ -73,7 +73,10 @@ jobs:
       name: {{ .testName }}-ssh
       publicKey: {{ .publicKey }}
 
-# Create source DataVolume first (one per namespace)
+# Create source DataVolume first (one per namespace).
+# customStatusPaths: kube-burner evaluates `key` as jq against the object's .status
+# (not the full resource). For CDI DataVolume, wait until .phase is Succeeded.
+# See lessons_learned.md (kube-burner customStatusPaths / Session 4).
 - name: create-source-dv
   jobType: create
   jobIterations: {{ $namespaceCount }}
