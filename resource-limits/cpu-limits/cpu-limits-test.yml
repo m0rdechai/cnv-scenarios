@@ -77,6 +77,28 @@ jobs:
       name: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       publicKey: {{ .publicKey }}
+{{- if eq (.guestOS | default "linux") "windows" }}
+  - objectTemplate: vm-cpu-windows-template.yml
+    replicas: {{ $vmCount }}
+    waitOptions:
+      labelSelector:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+    inputVars:
+      name: {{ $vmName }}
+      counter: {{ .counter | toString }}
+      OS: windows
+      registryUrl: {{ .windowsImageUrl | required "windowsImageUrl is required when guestOS=windows (docker://registry/...)" }}
+      cpuCores: {{ .cpuCores | default 1 }}
+      memory: {{ .memory | default "2Gi" }}
+      storage: {{ .storage | default "40Gi" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: {{ .volumeMode | default "Block" }}
+      VMIrunning: {{ .vmRunning | default true }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- else }}
   - objectTemplate: vm-cpu-template.yml
     replicas: {{ $vmCount }}
     waitOptions:
@@ -94,10 +116,11 @@ jobs:
       memory: {{ .memory | default "2Gi" }}
       storage: {{ .storage | default "10Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
-      volumemode: Block
+      volumemode: {{ .volumeMode | default "Block" }}
       VMIrunning: {{ .vmRunning | default true }}
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       publicKey: {{ .publicKey }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- end }}

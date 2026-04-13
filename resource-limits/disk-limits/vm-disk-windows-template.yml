@@ -1,0 +1,134 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  labels:
+    kubevirt-vm: vm-{{.name}}-{{.Replica}}
+    test-type: disk-limits
+    {{- range $key, $value := .vmLabels }}
+    {{ $key }}: {{ $value }}
+    {{- end }}
+  name: {{.name}}-{{.Replica}}
+spec:
+  runStrategy: {{ if .VMIrunning }}Always{{ else }}Halted{{ end }}
+  template:
+    metadata:
+      labels:
+        kubevirt-vm: vm-{{.name}}-{{.Replica}}
+        kubevirt.io/os: windows
+        test-type: disk-limits
+        {{- range $key, $value := .vmLabels }}
+        {{ $key }}: {{ $value }}
+        {{- end }}
+    spec:
+      accessCredentials:
+      - sshPublicKey:
+          propagationMethod:
+            qemuGuestAgent: {}
+          source:
+            secret:
+              secretName: "{{ .sshPublicKeySecret }}-{{ .counter }}"
+      {{- if .nodeSelector }}
+      nodeSelector:
+        {{ .nodeSelector }}
+      {{- end }}
+      domain:
+        clock:
+          timer:
+            hpet:
+              present: false
+            hyperv: {}
+            pit:
+              tickPolicy: delay
+            rtc:
+              tickPolicy: catchup
+        cpu:
+          cores: {{.cpuCores}}
+          sockets: 1
+          threads: 1
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          {{- range $i := until (.diskCount | int) }}
+          - disk:
+              bus: virtio
+            name: datadisk-{{ add $i 1 }}
+          {{- end }}
+          interfaces:
+          - masquerade: {}
+            model: virtio
+            name: default
+          networkInterfaceMultiqueue: true
+          rng: {}
+          tpm: {}
+        features:
+          acpi: {}
+          apic: {}
+          hyperv:
+            frequencies: {}
+            ipi: {}
+            reenlightenment: {}
+            relaxed: {}
+            reset: {}
+            spinlocks:
+              spinlocks: 8191
+            stimer: {}
+            synic: {}
+            tlbflush: {}
+            vapic: {}
+            vpindex: {}
+        firmware:
+          bootloader:
+            efi: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            memory: {{.memory}}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: dvclone-{{.Replica}}
+        name: rootdisk
+      {{- range $i := until (.diskCount | int) }}
+      - dataVolume:
+          name: datadisk-{{ add $i 1 }}-{{$.Replica}}
+        name: datadisk-{{ add $i 1 }}
+      {{- end }}
+  dataVolumeTemplates:
+  - metadata:
+      name: dvclone-{{.Replica}}
+    spec:
+      source:
+        registry:
+          url: {{ .registryUrl }}
+      storage:
+        accessModes:
+        - ReadWriteMany
+        resources:
+          requests:
+            storage: 20Gi
+        storageClassName: {{.storageclass}}
+        volumeMode: Block
+  {{- range $i := until (.diskCount | int) }}
+  - metadata:
+      name: datadisk-{{ add $i 1 }}-{{$.Replica}}
+    spec:
+      source:
+        blank: {}
+      storage:
+        accessModes:
+        {{- if eq $.volumemode "Filesystem" }}
+        - ReadWriteOnce
+        {{- else }}
+        - ReadWriteMany
+        {{- end }}
+        resources:
+          requests:
+            storage: {{$.storage}}
+        storageClassName: {{$.storageclass}}
+        volumeMode: {{$.volumemode}}
+  {{- end }}

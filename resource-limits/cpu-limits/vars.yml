@@ -40,8 +40,14 @@ storage: "10Gi"                            # Storage size for VM disk
 
 # Storage Configuration
 storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisioning
+volumeMode: "Block"
 
-# VM Image Configuration
+# Guest OS: linux (default) or windows — see docs/windows-image-build.md
+guestOS: linux
+# When guestOS is windows, set windowsImageUrl to a full CDI registry URL, e.g. docker://quay.io/org/image:tag
+# windowsImageUrl: ""
+
+# VM Image Configuration (Linux)
 imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"  # Fedora cloud image URL
 
 # Test Execution Control
@@ -58,7 +64,7 @@ nodeSelector: ""                           # Node selector for VM placement (e.g
 # SSH Configuration for VM Access
 privateKey: '/home/kni/.ssh/id_rsa'       # Path to private key for SSH validation
 publicKey: '/home/kni/.ssh/id_rsa.pub'    # Path to SSH public key file
-vmUser: 'fedora'                           # Username for SSH access to VMs (fedora for Fedora images, cloud-user for CentOS/RHEL)
+vmUser: 'fedora'                           # Use Administrator when guestOS is windows
 
 # Monitoring Configuration (Optional)
 esServer: ""  # Elasticsearch server for metrics storage

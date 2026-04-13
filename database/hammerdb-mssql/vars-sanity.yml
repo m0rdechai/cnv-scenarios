@@ -1,0 +1,34 @@
+# Sanity: smaller resources; same Windows image requirements apply.
+testNamespace: "cnv-sanity-hammerdb-mssql-TIMESTAMP"
+testName: "cnv-sanity-hammerdb-mssql"
+resultsPath: "/tmp/kube-burner-results/sanity-hammerdb-mssql"
+runTimestamp: "run-default"
+
+vmCount: 1
+counter: 1
+vmRunning: true
+
+cpuCores: 2
+memory: "8Gi"
+rootStorage: "50Gi"
+dataStorage: "20Gi"
+storageClassName: "ocs-storagecluster-ceph-rbd"
+volumeMode: "Filesystem"
+
+# REQUIRED when running: windowsImageUrl: "docker://..."
+
+privateKey: '/home/mlehrer/.ssh/id_rsa'
+publicKey: '/home/mlehrer/.ssh/id_rsa.pub'
+vmUser: 'Administrator'
+
+hammerdbTimeout: 30
+hammerdbResultsPath: "C:/tools/hammerdb-4.12/results/hammerdb-results.json"
+
+maxWaitTimeout: "45m"
+jobPause: "3m"
+nodeSelector: ""
+
+esServer: ""
+metadataIndex: "cnv-metadata"
+PROM: ""
+PROM_TOKEN: ""

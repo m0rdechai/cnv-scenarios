@@ -36,6 +36,10 @@ cpuCores: 16                               # CPU cores allocated to each VM
 # Storage Configuration
 storage: "20Gi"                            # Storage size for VM disk
 storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisioning
+volumeMode: "Block"                        # Root volume mode (Windows path uses this too)
+
+guestOS: linux
+# windowsImageUrl: "docker://quay.io/yourorg/windows:tag"
 
 # Test Execution Control
 counter: 1                                 # Test iteration counter (0 triggers cleanup)
@@ -51,7 +55,7 @@ nodeSelector: ""                           # Node selector for VM placement (e.g
 # SSH Configuration for VM Access
 privateKey: '/home/kni/.ssh/id_rsa'       # Path to private key for SSH validation
 publicKey: '/home/kni/.ssh/id_rsa.pub'    # Path to SSH public key file
-vmUser: 'fedora'                           # Username for SSH access to VMs (fedora for Fedora images, cloud-user for CentOS/RHEL)
+vmUser: 'fedora'                           # Use Administrator when guestOS is windows
 
 # Monitoring Configuration (Optional)
 esServer: ""  # Elasticsearch server for metrics storage

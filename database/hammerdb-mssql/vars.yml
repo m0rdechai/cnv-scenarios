@@ -1,0 +1,35 @@
+# HammerDB / MSSQL on Windows — see docs/windows-image-build.md
+testNamespace: "cnv-hammerdb-mssql"
+testName: "cnv-hammerdb-mssql"
+resultsPath: "/tmp/kube-burner-results/hammerdb-mssql"
+runTimestamp: "run-default"
+
+vmCount: 1
+counter: 1
+vmRunning: true
+
+cpuCores: 8
+memory: "16Gi"
+rootStorage: "80Gi"
+dataStorage: "100Gi"
+storageClassName: "ocs-storagecluster-ceph-rbd"
+volumeMode: "Block"
+
+# REQUIRED: full CDI registry URL for your Windows + MSSQL + HammerDB container disk
+# windowsImageUrl: "docker://quay.io/yourorg/your-windows-hammerdb:tag"
+
+privateKey: '/home/kni/.ssh/id_rsa'
+publicKey: '/home/kni/.ssh/id_rsa.pub'
+vmUser: 'Administrator'
+
+hammerdbTimeout: 45
+hammerdbResultsPath: "C:/tools/hammerdb-4.12/results/hammerdb-results.json"
+
+maxWaitTimeout: "60m"
+jobPause: "5m"
+nodeSelector: ""
+
+esServer: ""
+metadataIndex: "cnv-metadata"
+PROM: ""
+PROM_TOKEN: ""
