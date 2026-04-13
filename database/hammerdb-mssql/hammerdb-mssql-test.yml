@@ -1,16 +1,15 @@
 {{- $PROM := .PROM -}}
 {{- $PROM_TOKEN := .PROM_TOKEN -}}
 {{- $kubeBurnerFQDN := "kube-burner.io" -}}
-{{- $testName := "cnv-disk-limits" }}
-{{- $nsName := .testNamespace | default "cnv-disk-limits" -}}
+{{- $testName := "cnv-hammerdb-mssql" }}
+{{- $nsName := .testNamespace | default "cnv-hammerdb-mssql" -}}
 {{- $vmCount := .vmCount | default 1 -}}
-{{- $vmName := "disk-test-vm" -}}
+{{- $vmName := "hammerdb-mssql-vm" -}}
 {{- $sshPublicKeySecretName := $vmName -}}
 {{- $jobCounterLabelKey := (list $testName "." $kubeBurnerFQDN "/counter") | join "" -}}
 {{- $jobCounterLabelValue := (list "counter-" (.counter | toString )) | join "" -}}
 {{- $testNamespacesLabelKey := (list $kubeBurnerFQDN "/test-name") | join "" -}}
 {{- $testNamespacesLabelValue := $testName -}}
-{{- $metricsBaseDirectory := $testName -}}
 ---
 global:
   measurements:
@@ -33,7 +32,6 @@ metricsEndpoints:
 {{- end }}
 
 jobs:
-# Run cleanup only when counter is 0
 {{ if eq (.counter | int) 0 }}
 - name: start-fresh
   jobType: delete
@@ -46,29 +44,25 @@ jobs:
       {{ $testNamespacesLabelKey }}: {{ $testNamespacesLabelValue }}
 {{ end }}
 
-- name: disk-limits-test
+- name: hammerdb-mssql-test
   jobType: create
   jobIterations: 1
-  qps: 2
-  burst: 5
+  qps: 5
+  burst: 10
   namespacedIterations: false
   namespace: {{ $nsName }}
   namespaceLabels:
     {{ $testNamespacesLabelKey }}: {{ $testNamespacesLabelValue }}
-  # verify object count after running each job
   verifyObjects: true
   errorOnVerify: true
-  # interval between jobs execution
-  jobIterationDelay: 20s
-  # wait all VMI be in the Ready Condition
+  jobIterationDelay: 30s
   waitWhenFinished: false
   podWait: true
   maxWaitTimeout: {{ .maxWaitTimeout | default "60m" }}
-  jobPause: {{ .jobPause | default "10m" }}
+  jobPause: {{ .jobPause | default "5m" }}
   cleanup: false
-  # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_disk_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .diskCount | default 1 }} {{ .diskSize }} {{ .privateKey }} {{ .vmUser }} {{ .guestOS | default \"linux\" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: '../../config/scripts/wrapper.sh check_hammerdb_mssql {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .privateKey }} {{ .vmUser }} {{ .hammerdbTimeout | default 45 }} {{ .hammerdbResultsPath | default "C:/tools/hammerdb-4.12/results/hammerdb-results.json" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}'
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true
@@ -77,8 +71,7 @@ jobs:
       name: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       publicKey: {{ .publicKey }}
-{{- if eq (.guestOS | default "linux") "windows" }}
-  - objectTemplate: vm-disk-windows-template.yml
+  - objectTemplate: vm-hammerdb-mssql-template.yml
     replicas: {{ $vmCount }}
     waitOptions:
       labelSelector:
@@ -87,11 +80,11 @@ jobs:
       name: {{ $vmName }}
       counter: {{ .counter | toString }}
       OS: windows
-      registryUrl: {{ .windowsImageUrl | required "windowsImageUrl is required when guestOS=windows (docker://registry/...)" }}
-      cpuCores: {{ .cpuCores | default 16 }}
-      memory: {{ .memory | default "32Gi" }}
-      diskCount: {{ .diskCount | default 1 }}
-      storage: {{ .diskSize | default "10Gi" }}
+      registryUrl: {{ .windowsImageUrl | required "windowsImageUrl is required (docker://registry/...)" }}
+      cpuCores: {{ .cpuCores | default 8 }}
+      memory: {{ .memory | default "16Gi" }}
+      rootStorage: {{ .rootStorage | default "80Gi" }}
+      dataStorage: {{ .dataStorage | default "100Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: {{ .volumeMode | default "Block" }}
       VMIrunning: {{ .vmRunning | default true }}
@@ -99,27 +92,3 @@ jobs:
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
-{{- else }}
-  - objectTemplate: vm-disk-template.yml
-    replicas: {{ $vmCount }}
-    waitOptions:
-      labelSelector:
-        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
-    inputVars:
-      name: {{ $vmName }}
-      counter: {{ .counter | toString }}
-      OS: fedora
-      cpuCores: {{ .cpuCores | default 16 }}
-      memory: {{ .memory | default "32Gi" }}
-      url: {{ .imageUrl | default "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2" }}
-      # Disk configuration - can be overridden via CLI
-      diskCount: {{ .diskCount | default 1 }}
-      storage: {{ .diskSize | default "10Gi" }}
-      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
-      volumemode: {{ .volumeMode | default "Block" }}
-      VMIrunning: {{ .vmRunning | default true }}
-      nodeSelector: {{ .nodeSelector | default "" }}
-      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
-      vmLabels:
-        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
-{{- end }}

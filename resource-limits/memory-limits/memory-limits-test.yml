@@ -68,7 +68,7 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_memory_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .memorySize | default "2Gi" }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "../../config/scripts/wrapper.sh check_memory_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .memorySize | default "2Gi" }} {{ .privateKey }} {{ .vmUser }} {{ .guestOS | default \"linux\" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true
@@ -77,6 +77,28 @@ jobs:
       name: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       publicKey: {{ .publicKey }}
+{{- if eq (.guestOS | default "linux") "windows" }}
+  - objectTemplate: vm-memory-windows-template.yml
+    replicas: {{ $vmCount }}
+    waitOptions:
+      labelSelector:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+    inputVars:
+      name: {{ $vmName }}
+      counter: {{ .counter | toString }}
+      OS: windows
+      registryUrl: {{ .windowsImageUrl | required "windowsImageUrl is required when guestOS=windows (docker://registry/...)" }}
+      cpuCores: {{ .cpuCores | default 16 }}
+      memory: {{ .memorySize | default "2Gi" }}
+      storage: {{ .storage | default "40Gi" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: {{ .volumeMode | default "Block" }}
+      VMIrunning: {{ .vmRunning | default true }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- else }}
   - objectTemplate: vm-memory-template.yml
     replicas: {{ $vmCount }}
     waitOptions:
@@ -91,9 +113,10 @@ jobs:
       memory: {{ .memorySize | default "2Gi" }}
       storage: {{ .storage | default "20Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
-      volumemode: Block
+      volumemode: {{ .volumeMode | default "Block" }}
       VMIrunning: {{ .vmRunning | default true }}
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- end }}

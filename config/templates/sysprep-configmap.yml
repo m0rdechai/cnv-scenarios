@@ -1,0 +1,29 @@
+# Optional reference: ConfigMap holding autounattend.xml for Windows first-boot.
+# cnv-scenarios Windows paths primarily rely on a pre-built golden image plus
+# qemuGuestAgent SSH key propagation; use this pattern only if you need extra
+# first-boot customization (password seed, drivers, etc.).
+#
+# Do not apply as-is — replace PLACEHOLDER values and wire the ConfigMap into
+# the VM spec under volumes[].sysprep.configMap per KubeVirt documentation.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reference-windows-sysprep-do-not-apply
+  annotations:
+    cnv-scenarios.io/role: reference-documentation
+data:
+  autounattend.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <unattend xmlns="urn:schemas-microsoft-com:unattend">
+      <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <UserAccounts>
+            <AdministratorPassword>
+              <Value>PLACEHOLDER_PASSWORD</Value>
+              <PlainText>true</PlainText>
+            </AdministratorPassword>
+          </UserAccounts>
+        </component>
+      </settings>
+    </unattend>

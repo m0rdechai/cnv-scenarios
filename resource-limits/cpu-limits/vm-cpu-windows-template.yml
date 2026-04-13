@@ -1,0 +1,111 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  labels:
+    kubevirt-vm: vm-{{.name}}-{{.Replica}}
+    test-type: cpu-limits
+{{- range $key, $value := .vmLabels }}
+    {{ $key }}: {{ $value }}
+{{- end }}
+  name: {{.name}}-{{.Replica}}
+spec:
+  runStrategy: {{ if .VMIrunning }}Always{{ else }}Halted{{ end }}
+  template:
+    metadata:
+      labels:
+        kubevirt-vm: vm-{{.name}}-{{.Replica}}
+        kubevirt.io/os: windows
+        test-type: cpu-limits
+{{- range $key, $value := .vmLabels }}
+        {{ $key }}: {{ $value }}
+{{- end }}
+    spec:
+      accessCredentials:
+      - sshPublicKey:
+          propagationMethod:
+            qemuGuestAgent: {}
+          source:
+            secret:
+              secretName: "{{ .sshPublicKeySecret }}-{{ .counter }}"
+      {{- if .nodeSelector }}
+      nodeSelector:
+        {{ .nodeSelector }}
+      {{- end }}
+      domain:
+        clock:
+          timer:
+            hpet:
+              present: false
+            hyperv: {}
+            pit:
+              tickPolicy: delay
+            rtc:
+              tickPolicy: catchup
+        cpu:
+          cores: {{.cpuCores}}
+          sockets: 1
+          threads: 1
+          {{- if gt (.cpuCores | int) 16 }}
+          dedicatedCpuPlacement: true
+          {{- end }}
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          interfaces:
+          - masquerade: {}
+            model: virtio
+            name: default
+          networkInterfaceMultiqueue: true
+          rng: {}
+          tpm: {}
+        features:
+          acpi: {}
+          apic: {}
+          hyperv:
+            frequencies: {}
+            ipi: {}
+            reenlightenment: {}
+            relaxed: {}
+            reset: {}
+            spinlocks:
+              spinlocks: 8191
+            stimer: {}
+            synic: {}
+            tlbflush: {}
+            vapic: {}
+            vpindex: {}
+        firmware:
+          bootloader:
+            efi: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            memory: {{.memory}}
+            {{- if gt (.cpuCores | int) 16 }}
+            cpu: {{.cpuCores}}
+            {{- end }}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: dvclone-{{.Replica}}
+        name: rootdisk
+  dataVolumeTemplates:
+  - metadata:
+      name: dvclone-{{.Replica}}
+    spec:
+      source:
+        registry:
+          url: {{ .registryUrl }}
+      storage:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{.storage}}
+        storageClassName: {{.storageclass}}
+        volumeMode: {{.volumemode}}
