@@ -43,6 +43,9 @@ storage: "20Gi"                            # Root disk storage size
 storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisioning
 volumeMode: "Block"                        # Volume mode (Block or Filesystem)
 
+guestOS: linux
+# windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
+
 # VM Image Configuration
 imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"  # Fedora cloud image URL
 baseImage: "quay.io/containerdisks/fedora:41"  # Container disk base image
@@ -50,7 +53,7 @@ baseImage: "quay.io/containerdisks/fedora:41"  # Container disk base image
 # SSH Configuration for VM Access
 privateKey: '/home/kni/.ssh/id_rsa'       # Path to private key for SSH validation
 publicKey: '/home/kni/.ssh/id_rsa.pub'    # Path to SSH public key file
-vmUser: 'cloud-user'                       # Username for SSH access to VMs
+vmUser: 'cloud-user'                       # Use Administrator when guestOS is windows
 
 # Validation Configuration
 validatePvcBySize: true                    # If true, validates PVC sizes match expected size (default: true)

@@ -80,7 +80,7 @@ jobs:
       name: {{ $vmName }}
       counter: {{ .counter | toString }}
       OS: windows
-      registryUrl: {{ .windowsImageUrl | required "windowsImageUrl is required (docker://registry/...)" }}
+      registryUrl: "{{ .windowsImageUrl }}"
       cpuCores: {{ .cpuCores | default 8 }}
       memory: {{ .memory | default "16Gi" }}
       rootStorage: {{ .rootStorage | default "80Gi" }}
@@ -89,6 +89,7 @@ jobs:
       volumemode: {{ .volumeMode | default "Block" }}
       VMIrunning: {{ .vmRunning | default true }}
       nodeSelector: {{ .nodeSelector | default "" }}
+      vmUser: {{ .vmUser | default "Administrator" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}

@@ -45,6 +45,7 @@ declare -A TEST_REGISTRY=(
     ["high-memory"]="performance/high-memory:high-memory-performance.yml:yml"
     ["per-host-density"]="scale-testing/per-host-density:per-host-density.yml:yml"
     ["virt-capacity-benchmark"]="scale-testing/virt-capacity-benchmark:virt-capacity-benchmark.yml:yml"
+    ["hammerdb-mssql"]="database/hammerdb-mssql:hammerdb-mssql-test.yml:yml"
 )
 
 # Ordered list for --all execution
@@ -53,6 +54,7 @@ TEST_ORDER=(
     "memory-limits"
     "disk-limits"
     "disk-hotplug"
+    "hammerdb-mssql"
     "nic-hotplug"
     "minimal-resources"
     "large-disk"

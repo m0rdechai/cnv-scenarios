@@ -39,7 +39,7 @@ storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisi
 volumeMode: "Block"                        # Root volume mode (Windows path uses this too)
 
 guestOS: linux
-# windowsImageUrl: "docker://quay.io/yourorg/windows:tag"
+# windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
 
 # Test Execution Control
 counter: 1                                 # Test iteration counter (0 triggers cleanup)

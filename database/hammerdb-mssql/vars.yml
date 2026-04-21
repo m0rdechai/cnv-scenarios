@@ -16,7 +16,7 @@ storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Block"
 
 # REQUIRED: full CDI registry URL for your Windows + MSSQL + HammerDB container disk
-# windowsImageUrl: "docker://quay.io/yourorg/your-windows-hammerdb:tag"
+# windowsImageUrl: "docker://…" or "http(s)://…/your-windows-hammerdb.qcow2"
 
 privateKey: '/home/kni/.ssh/id_rsa'
 publicKey: '/home/kni/.ssh/id_rsa.pub'

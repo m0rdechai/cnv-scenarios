@@ -1,7 +1,7 @@
 # Reference only — do not pass this file directly to kube-burner without templating.
 # Scenario-specific files (e.g. resource-limits/cpu-limits/vm-cpu-windows-template.yml)
 # follow this shape: q35, UEFI, VirtIO disks, masquerade NIC, TPM, Hyper-V enlightenments,
-# DataVolume from registry (windowsImageUrl as docker://…), and qemuGuestAgent SSH propagation.
+# DataVolume from CDI registry (docker://…) or http(s) qcow2 URL, and qemuGuestAgent SSH propagation.
 #
 # See docs/windows-image-build.md for image requirements.
 ---
@@ -47,6 +47,8 @@ spec:
         features:
           acpi: {}
           apic: {}
+          smm:
+            enabled: true
           hyperv:
             frequencies: {}
             ipi: {}
@@ -55,7 +57,6 @@ spec:
             reset: {}
             spinlocks:
               spinlocks: 8191
-            stimer: {}
             synic: {}
             tlbflush: {}
             vapic: {}
@@ -74,7 +75,9 @@ spec:
       accessCredentials:
         - sshPublicKey:
             propagationMethod:
-              qemuGuestAgent: {}
+              qemuGuestAgent:
+                users:
+                  - "Administrator"
             source:
               secret:
                 secretName: REPLACE-ssh-secret-name
@@ -86,6 +89,7 @@ spec:
     - metadata:
         name: dvclone-0
       spec:
+        # Scenario templates use registry when windowsImageUrl starts with docker://, else http.
         source:
           registry:
             url: docker://REPLACE-registry-pullspec

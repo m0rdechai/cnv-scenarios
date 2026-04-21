@@ -214,7 +214,7 @@ function check_vm_running() {
                     --local-ssh-opts="-o PreferredAuthentications=publickey" \
                     -n "${vm_ns}" -i "${private_key}" \
                     --command "hostname && echo SSH_OK" \
-                    "${vm_user}@${vm}" 2>&1 || echo "SSH_FAILED")
+                    "${vm_user}@vmi/${vm}" 2>&1 || echo "SSH_FAILED")
                     
                     if echo "${ssh_test}" | grep -q "SSH_OK"; then
                         ssh_success=true
