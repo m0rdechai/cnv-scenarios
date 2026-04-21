@@ -8,14 +8,14 @@ vmCount: 1
 counter: 1
 vmRunning: true
 
-cpuCores: 2
-memory: "8Gi"
-rootStorage: "50Gi"
-dataStorage: "20Gi"
+cpuCores: 8
+memory: "16Gi"
+rootStorage: "80Gi"
+dataStorage: "100Gi"
 storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Filesystem"
 
-# REQUIRED when running: windowsImageUrl: "docker://..."
+# REQUIRED when running: windowsImageUrl (docker://… or http(s)://…/.qcow2)
 
 privateKey: '/home/mlehrer/.ssh/id_rsa'
 publicKey: '/home/mlehrer/.ssh/id_rsa.pub'

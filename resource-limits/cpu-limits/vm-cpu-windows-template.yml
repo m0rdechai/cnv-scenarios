@@ -23,7 +23,9 @@ spec:
       accessCredentials:
       - sshPublicKey:
           propagationMethod:
-            qemuGuestAgent: {}
+            qemuGuestAgent:
+              users:
+                - "{{ .vmUser }}"
           source:
             secret:
               secretName: "{{ .sshPublicKeySecret }}-{{ .counter }}"
@@ -63,6 +65,8 @@ spec:
         features:
           acpi: {}
           apic: {}
+          smm:
+            enabled: true
           hyperv:
             frequencies: {}
             ipi: {}
@@ -71,7 +75,6 @@ spec:
             reset: {}
             spinlocks:
               spinlocks: 8191
-            stimer: {}
             synic: {}
             tlbflush: {}
             vapic: {}
@@ -99,8 +102,13 @@ spec:
       name: dvclone-{{.Replica}}
     spec:
       source:
+{{- if hasPrefix .registryUrl "docker://" }}
         registry:
           url: {{ .registryUrl }}
+{{- else }}
+        http:
+          url: {{ .registryUrl }}
+{{- end }}
       storage:
         accessModes:
         - ReadWriteOnce

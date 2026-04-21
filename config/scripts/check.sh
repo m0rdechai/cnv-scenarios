@@ -100,7 +100,7 @@ remote_command() {
         --local-ssh-opts="-o PasswordAuthentication=no" \
         --local-ssh-opts="-o PreferredAuthentications=publickey" \
         --local-ssh-opts="-o ConnectTimeout=30" \
-        -n "${namespace}" -i "${identity_file}" -c "${command}" --username "${remote_user}" "${vm_name}" 2>/dev/null)
+        -n "${namespace}" -i "${identity_file}" -c "${command}" --username "${remote_user}" "vmi/${vm_name}" 2>/dev/null)
     local ret=$?
     if [ $ret -ne 0 ]; then
         return 1
@@ -122,7 +122,7 @@ remote_command_password() {
         --local-ssh-opts="-o StrictHostKeyChecking=no" \
         --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
         --local-ssh-opts="-o ConnectTimeout=30" \
-        -n "${namespace}" -c "${command}" --username "${remote_user}" "${vm_name}" 2>/dev/null)
+        -n "${namespace}" -c "${command}" --username "${remote_user}" "vmi/${vm_name}" 2>/dev/null)
     local ret=$?
     if [ $ret -ne 0 ]; then
         return 1

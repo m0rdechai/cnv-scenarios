@@ -215,7 +215,7 @@ function check_vm_running() {
                     --local-ssh-opts="-o PreferredAuthentications=publickey" \
                     -n "${vm_ns}" -i "${private_key}" \
                     --command "hostname && echo SSH_OK" \
-                    "${vm_user}@${vm}" 2>&1 || echo "SSH_FAILED")
+                    "${vm_user}@vmi/${vm}" 2>&1 || echo "SSH_FAILED")
                     
                     if echo "${ssh_test}" | grep -q "SSH_OK"; then
                         ssh_success=true
@@ -402,7 +402,7 @@ function check_resize() {
             --local-ssh-opts="-o BatchMode=yes" \
             -n "${namespace}" -i "${private_key}" \
             --command "lsblk --json -v --output=NAME,SIZE" \
-            "${vm_user}@${vm}" 2>/dev/null || echo "SSH_FAILED")
+            "${vm_user}@vmi/${vm}" 2>/dev/null || echo "SSH_FAILED")
 
         if echo "${blk_devices}" | grep -q "SSH_FAILED"; then
             echo "  ✗ Failed to SSH to VM ${vm}"

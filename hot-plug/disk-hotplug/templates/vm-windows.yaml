@@ -2,20 +2,20 @@ apiVersion: kubevirt.io/v1
 kind: VirtualMachine
 metadata:
   labels:
-    kubevirt-vm: vm-{{.name}}-{{.Replica}}
-    test-type: hammerdb-mssql
+    kubevirt-vm: 'vm-{{.name}}-{{.Replica}}'
+    test-type: disk-hotplug
 {{- range $key, $value := .vmLabels }}
     {{ $key }}: {{ $value }}
 {{- end }}
-  name: {{.name}}-{{.Replica}}
+  name: '{{.name}}-{{.Replica}}'
 spec:
   runStrategy: {{ if .VMIrunning }}Always{{ else }}Halted{{ end }}
   template:
     metadata:
       labels:
-        kubevirt-vm: vm-{{.name}}-{{.Replica}}
+        kubevirt-vm: "vm-{{.name}}-{{.Replica}}"
         kubevirt.io/os: windows
-        test-type: hammerdb-mssql
+        test-type: disk-hotplug
 {{- range $key, $value := .vmLabels }}
         {{ $key }}: {{ $value }}
 {{- end }}
@@ -50,11 +50,8 @@ spec:
         devices:
           disks:
           - disk:
-              bus: virtio
+              bus: scsi
             name: rootdisk
-          - disk:
-              bus: virtio
-            name: datadisk
           interfaces:
           - masquerade: {}
             model: virtio
@@ -87,7 +84,6 @@ spec:
         resources:
           requests:
             memory: {{.memory}}
-            cpu: {{.cpuCores}}
       networks:
       - name: default
         pod: {}
@@ -95,9 +91,6 @@ spec:
       - dataVolume:
           name: dvclone-{{.Replica}}
         name: rootdisk
-      - dataVolume:
-          name: hammerdb-data-{{.Replica}}
-        name: datadisk
   dataVolumeTemplates:
   - metadata:
       name: dvclone-{{.Replica}}
@@ -112,22 +105,9 @@ spec:
 {{- end }}
       storage:
         accessModes:
-        - ReadWriteOnce
+        - ReadWriteMany
         resources:
           requests:
-            storage: {{.rootStorage}}
-        storageClassName: {{.storageclass}}
-        volumeMode: {{.volumemode}}
-  - metadata:
-      name: hammerdb-data-{{.Replica}}
-    spec:
-      source:
-        blank: {}
-      storage:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: {{.dataStorage}}
+            storage: {{.storage}}
         storageClassName: {{.storageclass}}
         volumeMode: {{.volumemode}}

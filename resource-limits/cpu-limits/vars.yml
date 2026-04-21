@@ -40,7 +40,7 @@ volumeMode: "Block"
 
 # Guest OS: linux (default) or windows — see docs/windows-image-build.md
 guestOS: linux
-# When guestOS is windows, set windowsImageUrl to a full CDI registry URL, e.g. docker://quay.io/org/image:tag
+# When guestOS is windows, set windowsImageUrl: docker://… (container disk) or http(s)://…/.qcow2 (CDI HTTP import)
 # windowsImageUrl: ""
 
 # VM Image Configuration (Linux)
