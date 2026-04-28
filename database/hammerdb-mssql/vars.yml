@@ -8,10 +8,12 @@ vmCount: 1
 counter: 1
 vmRunning: true
 
+# VM Shape — these values drive both VM creation AND validation expectations
 cpuCores: 8
 memory: "16Gi"
 rootStorage: "80Gi"
-dataStorage: "100Gi"
+dataDisks: 3
+diskSize: "100Gi"
 storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Block"
 
@@ -22,12 +24,28 @@ privateKey: '/home/kni/.ssh/id_rsa'
 publicKey: '/home/kni/.ssh/id_rsa.pub'
 vmUser: 'Administrator'
 
-hammerdbTimeout: 45
-hammerdbResultsPath: "C:/tools/hammerdb-4.12/results/hammerdb-results.json"
-
 maxWaitTimeout: "60m"
 jobPause: "5m"
 nodeSelector: ""
+
+# Validation Configuration — each toggle enables/disables a check phase
+validateOS: true
+expectedOS: "Windows Server 2022"
+validateSSH: true
+validateApps: "MSSQLSERVER"
+validateCPU: true
+validateMemory: true
+validateNICs: true
+expectedNICs: 1
+initializeDisks: true
+validateDisks: true
+validateDiskUtil: false
+expectedDiskUtilGB: 0
+diskUtilTolerancePct: 10
+validateDiskUtilAfterProcess: true
+waitProcessName: "hammerdb"
+waitProcessTimeout: 45
+expectedDiskUtilAfterProcessGB: 50
 
 esServer: ""
 metadataIndex: "cnv-metadata"
