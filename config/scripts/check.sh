@@ -140,6 +140,26 @@ windows_guest_data_disk_count_cmd='powershell.exe -NoProfile -Command "(Get-Disk
 # shellcheck disable=SC2016
 windows_guest_cpu_burn_count_cmd='powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '"'"'*CNV_CPU_BURN=1*'"'"' }).Count"'
 
+# Windows guest: OS caption (e.g. "Microsoft Windows Server 2022 Datacenter")
+# shellcheck disable=SC2016
+windows_guest_os_name_cmd='powershell.exe -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).Caption"'
+
+# Windows guest: count of NICs that are Up and have an IPv4 address
+# shellcheck disable=SC2016
+windows_guest_nic_count_cmd='powershell.exe -NoProfile -Command "@(Get-NetAdapter | Where-Object Status -eq Up | Where-Object { Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue }).Count"'
+
+# Windows guest: initialize offline/RAW disks (idempotent — only touches disks that need it)
+# shellcheck disable=SC2016
+windows_guest_disk_init_cmd='powershell.exe -NoProfile -Command "Get-Disk | Where-Object { $_.OperationalStatus -eq '"'"'Offline'"'"' } | Set-Disk -IsOffline $false; Get-Disk | Where-Object { $_.IsReadOnly } | Set-Disk -IsReadOnly $false; $raw = @(Get-Disk | Where-Object { $_.PartitionStyle -eq '"'"'RAW'"'"' }); foreach ($d in $raw) { $d | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -Confirm:$false }; Write-Output \"INITIALIZED=$($raw.Count)\""'
+
+# Windows guest: data disk count and total size in GB as JSON (non-system disks)
+# shellcheck disable=SC2016
+windows_guest_data_disk_info_cmd='powershell.exe -NoProfile -Command "$d = @(Get-Disk | Where-Object { -not $_.IsSystem }); @{ count=$d.Count; totalGB=[math]::Round(($d | Measure-Object -Property Size -Sum).Sum/1GB) } | ConvertTo-Json -Compress"'
+
+# Windows guest: used space on non-C: fixed volumes in GB as JSON
+# shellcheck disable=SC2016
+windows_guest_disk_util_cmd='powershell.exe -NoProfile -Command "$v = @(Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq '"'"'Fixed'"'"' -and $_.DriveLetter -ne '"'"'C'"'"' }); @{ usedGB=[math]::Round(($v | ForEach-Object { $_.Size - $_.SizeRemaining } | Measure-Object -Sum).Sum/1GB) } | ConvertTo-Json -Compress"'
+
 # Check disk hot-plug for Windows guests (no Linux mount-hotplug script).
 check_disk_hotplug_windows_guest() {
     local namespace=$1
@@ -1448,6 +1468,507 @@ VALIDATIONS
     return 1
 }
 
+# General-purpose Windows VM validation with vars-driven toggling.
+# Positional args: label_key label_value namespace private_key vm_user results_dir
+# Remaining args: key=value pairs for validation toggles and expected values.
+check_windows_vm() {
+    local label_key="$1"
+    local label_value="$2"
+    local namespace="$3"
+    local private_key="$4"
+    local vm_user="$5"
+    local results_dir="$6"
+    shift 6
+
+    # Parse key=value pairs into an associative array
+    local -A cfg
+    for arg in "$@"; do
+        cfg["${arg%%=*}"]="${arg#*=}"
+    done
+
+    # Defaults for every toggle / expected value
+    local validate_ssh="${cfg[validateSSH]:-true}"
+    local validate_os="${cfg[validateOS]:-true}"
+    local expected_os="${cfg[expectedOS]:-Windows}"
+    local validate_apps="${cfg[validateApps]:-}"
+    local validate_cpu="${cfg[validateCPU]:-true}"
+    local expected_cpu="${cfg[cpuCores]:-0}"
+    local validate_memory="${cfg[validateMemory]:-true}"
+    local expected_memory="${cfg[memory]:-0}"
+    local validate_nics="${cfg[validateNICs]:-true}"
+    local expected_nics="${cfg[expectedNICs]:-1}"
+    local initialize_disks="${cfg[initializeDisks]:-true}"
+    local validate_disks="${cfg[validateDisks]:-true}"
+    local expected_data_disks="${cfg[dataDisks]:-1}"
+    local expected_disk_size="${cfg[diskSize]:-100Gi}"
+    local validate_disk_util="${cfg[validateDiskUtil]:-false}"
+    local expected_disk_util_gb="${cfg[expectedDiskUtilGB]:-0}"
+    local disk_util_tolerance_pct="${cfg[diskUtilTolerancePct]:-10}"
+    local validate_disk_util_after="${cfg[validateDiskUtilAfterProcess]:-false}"
+    local wait_process_name="${cfg[waitProcessName]:-}"
+    local wait_process_timeout="${cfg[waitProcessTimeout]:-45}"
+    local expected_disk_util_after_gb="${cfg[expectedDiskUtilAfterProcessGB]:-0}"
+
+    echo "=============================================="
+    echo "  Windows VM Validation (check_windows_vm)"
+    echo "=============================================="
+    echo "Namespace: ${namespace}"
+    echo "Label: ${label_key}=${label_value}"
+    echo "Results dir: ${results_dir}"
+    echo "----------------------------------------------"
+
+    log_validation_start "check_windows_vm"
+    local start_time
+    start_time=$(date +%s)
+    mkdir -p "${results_dir}"
+
+    # Discover VMs
+    local vms
+    vms=$(get_vms "${namespace}" "${label_key}" "${label_value}")
+    local vm_count
+    vm_count=$(echo "${vms}" | wc -w)
+    if [ -z "${vms}" ] || [ "${vm_count}" -eq 0 ]; then
+        log_validation_checkpoint "vm_discovery" "FAIL" "No VMs found"
+        log_validation_end "FAILED" "$(($(date +%s) - start_time))s"
+        save_validation_report "windows-vm" "FAILED" "${namespace}" "{}" "[]" "${results_dir}"
+        return 1
+    fi
+    echo "Found ${vm_count} VM(s): ${vms}"
+    log_validation_checkpoint "vm_discovery" "PASS" "Found ${vm_count} VMs"
+
+    local overall_status="SUCCESS"
+
+    # Accumulate validation results as JSON array entries
+    local -a validations=()
+    validations+=("{\"phase\": \"vm_discovery\", \"status\": \"PASS\", \"message\": \"Found ${vm_count} VMs\"}")
+
+    # Track whether SSH is available (gate for all guest checks)
+    local ssh_ok="false"
+    # Track whether disk init succeeded (gate for disk validation phases)
+    local disk_init_ok="false"
+
+    for vm in ${vms}; do
+        echo ""
+        echo "--- Validating VM: ${vm} ---"
+
+        # Verify VM is Running
+        local printable
+        printable=$(oc get vm -n "${namespace}" "${vm}" -o jsonpath='{.status.printableStatus}' 2>/dev/null || echo "")
+        if [ "${printable}" != "Running" ]; then
+            echo "  FAIL: VM ${vm} not Running (status=${printable})"
+            overall_status="FAILED"
+            validations+=("{\"phase\": \"vm_running\", \"status\": \"FAIL\", \"message\": \"VM ${vm} status=${printable}\"}")
+            continue
+        fi
+        echo "  OK: VM ${vm} is Running"
+
+        # ──────────────────────────────────────
+        # Phase 1: SSH check
+        # ──────────────────────────────────────
+        if [ "${validate_ssh}" = "true" ]; then
+            echo "  [1/10] SSH check..."
+            local ssh_test
+            ssh_test=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "echo SSH_OK" 2>&1) || true
+            if echo "${ssh_test}" | grep -q "SSH_OK"; then
+                echo "    PASS: SSH connectivity verified"
+                log_validation_checkpoint "ssh_check" "PASS" "SSH OK for ${vm}"
+                validations+=("{\"phase\": \"ssh_check\", \"status\": \"PASS\", \"message\": \"SSH connectivity verified for ${vm}\"}")
+                ssh_ok="true"
+            else
+                echo "    FAIL: SSH failed for ${vm}"
+                log_validation_checkpoint "ssh_check" "FAIL" "SSH failed for ${vm}"
+                validations+=("{\"phase\": \"ssh_check\", \"status\": \"FAIL\", \"message\": \"SSH failed for ${vm}\"}")
+                overall_status="FAILED"
+                continue
+            fi
+        else
+            echo "  [1/10] SSH check... SKIP"
+            validations+=("{\"phase\": \"ssh_check\", \"status\": \"SKIP\", \"message\": \"validateSSH=false\"}")
+        fi
+
+        # All remaining phases require SSH
+        if [ "${ssh_ok}" != "true" ]; then
+            echo "  Skipping guest checks — SSH not available"
+            continue
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 2: OS check
+        # ──────────────────────────────────────
+        if [ "${validate_os}" = "true" ]; then
+            echo "  [2/10] OS check..."
+            local guest_os_name
+            guest_os_name=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_os_name_cmd}" 2>/dev/null || echo "")
+            guest_os_name=$(echo "${guest_os_name}" | tr -d '\r' | head -1 | xargs)
+            if [ -n "${guest_os_name}" ] && echo "${guest_os_name}" | grep -qi "${expected_os}"; then
+                echo "    PASS: OS matches — got '${guest_os_name}', expected pattern '${expected_os}'"
+                log_validation_checkpoint "os_check" "PASS" "OS=${guest_os_name}"
+                validations+=("{\"phase\": \"os_check\", \"status\": \"PASS\", \"message\": \"Expected: ${expected_os}, Got: ${guest_os_name}\"}")
+            else
+                echo "    FAIL: OS mismatch — got '${guest_os_name}', expected pattern '${expected_os}'"
+                log_validation_checkpoint "os_check" "FAIL" "Expected ${expected_os}, got ${guest_os_name}"
+                validations+=("{\"phase\": \"os_check\", \"status\": \"FAIL\", \"message\": \"Expected: ${expected_os}, Got: ${guest_os_name}\"}")
+                overall_status="FAILED"
+            fi
+        else
+            echo "  [2/10] OS check... SKIP"
+            validations+=("{\"phase\": \"os_check\", \"status\": \"SKIP\", \"message\": \"validateOS=false\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 3: App check (services)
+        # ──────────────────────────────────────
+        if [ -n "${validate_apps}" ]; then
+            echo "  [3/10] App check (services: ${validate_apps})..."
+            IFS=',' read -ra app_list <<< "${validate_apps}"
+            for svc in "${app_list[@]}"; do
+                svc=$(echo "${svc}" | xargs)
+                [ -z "${svc}" ] && continue
+                local svc_status
+                # shellcheck disable=SC2016
+                svc_status=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "powershell.exe -NoProfile -Command \"(Get-Service '${svc}' -ErrorAction SilentlyContinue).Status\"" 2>/dev/null || echo "")
+                svc_status=$(echo "${svc_status}" | tr -d '\r' | head -1 | xargs)
+                if echo "${svc_status}" | grep -qi "Running"; then
+                    echo "    PASS: Service ${svc} is Running"
+                    log_validation_checkpoint "app_check_${svc}" "PASS" "${svc} Running"
+                    validations+=("{\"phase\": \"app_check_${svc}\", \"status\": \"PASS\", \"message\": \"Service ${svc} is Running\"}")
+                else
+                    echo "    FAIL: Service ${svc} status='${svc_status}'"
+                    log_validation_checkpoint "app_check_${svc}" "FAIL" "${svc} status=${svc_status}"
+                    validations+=("{\"phase\": \"app_check_${svc}\", \"status\": \"FAIL\", \"message\": \"Service ${svc} status=${svc_status}\"}")
+                    overall_status="FAILED"
+                fi
+            done
+        else
+            echo "  [3/10] App check... SKIP (no services specified)"
+            validations+=("{\"phase\": \"app_check\", \"status\": \"SKIP\", \"message\": \"validateApps is empty\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 4: CPU check
+        # ──────────────────────────────────────
+        if [ "${validate_cpu}" = "true" ] && [ "${expected_cpu}" != "0" ]; then
+            echo "  [4/10] CPU check (expected: ${expected_cpu})..."
+            local guest_cpus
+            guest_cpus=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_cpu_count_cmd}" 2>/dev/null || echo "0")
+            guest_cpus=$(echo "${guest_cpus}" | head -1 | tr -cd '0-9')
+            guest_cpus=${guest_cpus:-0}
+            if [ "${guest_cpus}" -eq "${expected_cpu}" ]; then
+                echo "    PASS: CPU count matches — expected ${expected_cpu}, got ${guest_cpus}"
+                log_validation_checkpoint "cpu_check" "PASS" "Expected ${expected_cpu}, got ${guest_cpus}"
+                validations+=("{\"phase\": \"cpu_check\", \"status\": \"PASS\", \"message\": \"Expected: ${expected_cpu}, Got: ${guest_cpus}\"}")
+            else
+                echo "    FAIL: CPU count mismatch — expected ${expected_cpu}, got ${guest_cpus}"
+                log_validation_checkpoint "cpu_check" "FAIL" "Expected ${expected_cpu}, got ${guest_cpus}"
+                validations+=("{\"phase\": \"cpu_check\", \"status\": \"FAIL\", \"message\": \"Expected: ${expected_cpu}, Got: ${guest_cpus}\"}")
+                overall_status="FAILED"
+            fi
+        else
+            echo "  [4/10] CPU check... SKIP"
+            validations+=("{\"phase\": \"cpu_check\", \"status\": \"SKIP\", \"message\": \"validateCPU=false or cpuCores=0\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 5: Memory check
+        # ──────────────────────────────────────
+        if [ "${validate_memory}" = "true" ] && [ "${expected_memory}" != "0" ]; then
+            echo "  [5/10] Memory check (expected: ${expected_memory})..."
+            # Convert expected_memory (e.g. "16Gi") to MB
+            local expected_mb
+            expected_mb=$(echo "${expected_memory}" | sed 's/Gi$//' | sed 's/G$//')
+            expected_mb=$((expected_mb * 1024))
+
+            local guest_mb
+            guest_mb=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_memory_mb_cmd}" 2>/dev/null || echo "0")
+            guest_mb=$(echo "${guest_mb}" | head -1 | tr -cd '0-9')
+            guest_mb=${guest_mb:-0}
+
+            # 5% tolerance
+            local tolerance=$((expected_mb * 5 / 100))
+            local diff=$((expected_mb - guest_mb))
+            [ "${diff}" -lt 0 ] && diff=$((-diff))
+
+            if [ "${diff}" -le "${tolerance}" ]; then
+                echo "    PASS: Memory within tolerance — expected ~${expected_mb}MB, got ${guest_mb}MB (diff ${diff}MB <= ${tolerance}MB)"
+                log_validation_checkpoint "memory_check" "PASS" "Expected ~${expected_mb}MB, got ${guest_mb}MB"
+                validations+=("{\"phase\": \"memory_check\", \"status\": \"PASS\", \"message\": \"Expected: ~${expected_mb}MB, Got: ${guest_mb}MB (within 5%)\"}")
+            else
+                echo "    FAIL: Memory out of tolerance — expected ~${expected_mb}MB, got ${guest_mb}MB (diff ${diff}MB > ${tolerance}MB)"
+                log_validation_checkpoint "memory_check" "FAIL" "Expected ~${expected_mb}MB, got ${guest_mb}MB"
+                validations+=("{\"phase\": \"memory_check\", \"status\": \"FAIL\", \"message\": \"Expected: ~${expected_mb}MB, Got: ${guest_mb}MB (diff ${diff}MB exceeds 5%)\"}")
+                overall_status="FAILED"
+            fi
+        else
+            echo "  [5/10] Memory check... SKIP"
+            validations+=("{\"phase\": \"memory_check\", \"status\": \"SKIP\", \"message\": \"validateMemory=false or memory=0\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 6: NIC check (validate-only)
+        # ──────────────────────────────────────
+        if [ "${validate_nics}" = "true" ]; then
+            echo "  [6/10] NIC check (expected: ${expected_nics})..."
+            local guest_nics
+            guest_nics=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_nic_count_cmd}" 2>/dev/null || echo "0")
+            guest_nics=$(echo "${guest_nics}" | head -1 | tr -cd '0-9')
+            guest_nics=${guest_nics:-0}
+            if [ "${guest_nics}" -eq "${expected_nics}" ]; then
+                echo "    PASS: NIC count matches — expected ${expected_nics}, got ${guest_nics}"
+                log_validation_checkpoint "nic_check" "PASS" "Expected ${expected_nics}, got ${guest_nics}"
+                validations+=("{\"phase\": \"nic_check\", \"status\": \"PASS\", \"message\": \"Expected NICs: ${expected_nics}, Got: ${guest_nics}, all with IPv4\"}")
+            else
+                echo "    FAIL: NIC count mismatch — expected ${expected_nics}, got ${guest_nics}"
+                log_validation_checkpoint "nic_check" "FAIL" "Expected ${expected_nics}, got ${guest_nics}"
+                validations+=("{\"phase\": \"nic_check\", \"status\": \"FAIL\", \"message\": \"Expected NICs: ${expected_nics}, Got: ${guest_nics}\"}")
+                overall_status="FAILED"
+            fi
+        else
+            echo "  [6/10] NIC check... SKIP"
+            validations+=("{\"phase\": \"nic_check\", \"status\": \"SKIP\", \"message\": \"validateNICs=false\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 7: Disk initialization (action phase)
+        # ──────────────────────────────────────
+        if [ "${initialize_disks}" = "true" ]; then
+            echo "  [7/10] Disk initialization (bring offline disks online, GPT, NTFS)..."
+            local init_output
+            init_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_init_cmd}" 2>/dev/null || echo "INIT_ERROR")
+
+            local initialized_count
+            initialized_count=$(echo "${init_output}" | grep -oP 'INITIALIZED=\K[0-9]+' || echo "0")
+            initialized_count=${initialized_count:-0}
+
+            if echo "${init_output}" | grep -q "INIT_ERROR"; then
+                echo "    FAIL: Disk initialization command failed"
+                echo "    Output: ${init_output}"
+                log_validation_checkpoint "disk_init" "FAIL" "Disk init command error"
+                validations+=("{\"phase\": \"disk_init\", \"status\": \"FAIL\", \"message\": \"Disk initialization command failed\"}")
+                overall_status="FAILED"
+            else
+                echo "    PASS: Initialized ${initialized_count} disk(s)"
+                log_validation_checkpoint "disk_init" "PASS" "Initialized ${initialized_count} disks"
+                validations+=("{\"phase\": \"disk_init\", \"status\": \"PASS\", \"message\": \"Initialized ${initialized_count} disk(s)\"}")
+                disk_init_ok="true"
+            fi
+        else
+            echo "  [7/10] Disk initialization... SKIP"
+            validations+=("{\"phase\": \"disk_init\", \"status\": \"SKIP\", \"message\": \"initializeDisks=false\"}")
+            # If user skips init, assume disks are already ready
+            disk_init_ok="true"
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 8: Disk count/size check
+        # ──────────────────────────────────────
+        if [ "${validate_disks}" = "true" ]; then
+            if [ "${disk_init_ok}" != "true" ]; then
+                echo "  [8/10] Disk check... SKIP (disk init failed)"
+                validations+=("{\"phase\": \"disk_check\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
+            else
+                echo "  [8/10] Disk check (expected: ${expected_data_disks} disk(s), ${expected_disk_size} each)..."
+                local disk_info_json
+                disk_info_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_data_disk_info_cmd}" 2>/dev/null || echo "{}")
+
+                local guest_disk_count
+                guest_disk_count=$(echo "${disk_info_json}" | grep -oP '"count"\s*:\s*\K[0-9]+' || echo "0")
+                guest_disk_count=${guest_disk_count:-0}
+                local guest_total_gb
+                guest_total_gb=$(echo "${disk_info_json}" | grep -oP '"totalGB"\s*:\s*\K[0-9]+' || echo "0")
+                guest_total_gb=${guest_total_gb:-0}
+
+                # Convert expected_disk_size (e.g. "100Gi") to GB numeric
+                local expected_size_gb
+                expected_size_gb=$(echo "${expected_disk_size}" | sed 's/Gi$//' | sed 's/G$//')
+                local expected_total_gb=$((expected_size_gb * expected_data_disks))
+
+                local disk_ok="true"
+                if [ "${guest_disk_count}" -ne "${expected_data_disks}" ]; then
+                    echo "    FAIL: Disk count mismatch — expected ${expected_data_disks}, got ${guest_disk_count}"
+                    disk_ok="false"
+                fi
+
+                # 5% tolerance on total size
+                local size_tolerance=$((expected_total_gb * 5 / 100))
+                [ "${size_tolerance}" -lt 1 ] && size_tolerance=1
+                local size_diff=$((expected_total_gb - guest_total_gb))
+                [ "${size_diff}" -lt 0 ] && size_diff=$((-size_diff))
+                if [ "${size_diff}" -gt "${size_tolerance}" ]; then
+                    echo "    FAIL: Disk total size mismatch — expected ~${expected_total_gb}GB, got ${guest_total_gb}GB"
+                    disk_ok="false"
+                fi
+
+                if [ "${disk_ok}" = "true" ]; then
+                    echo "    PASS: ${guest_disk_count} disk(s) totaling ${guest_total_gb}GB (expected ${expected_data_disks} totaling ~${expected_total_gb}GB)"
+                    log_validation_checkpoint "disk_check" "PASS" "${guest_disk_count} disks, ${guest_total_gb}GB"
+                    validations+=("{\"phase\": \"disk_check\", \"status\": \"PASS\", \"message\": \"Expected: ${expected_data_disks} disk(s) totaling ${expected_total_gb}GB, Got: ${guest_disk_count} disk(s) totaling ${guest_total_gb}GB\"}")
+                else
+                    log_validation_checkpoint "disk_check" "FAIL" "count=${guest_disk_count} size=${guest_total_gb}GB"
+                    validations+=("{\"phase\": \"disk_check\", \"status\": \"FAIL\", \"message\": \"Expected: ${expected_data_disks} disk(s) totaling ${expected_total_gb}GB, Got: ${guest_disk_count} disk(s) totaling ${guest_total_gb}GB\"}")
+                    overall_status="FAILED"
+                fi
+            fi
+        else
+            echo "  [8/10] Disk check... SKIP"
+            validations+=("{\"phase\": \"disk_check\", \"status\": \"SKIP\", \"message\": \"validateDisks=false\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 9: Disk utilization check
+        # ──────────────────────────────────────
+        if [ "${validate_disk_util}" = "true" ]; then
+            if [ "${disk_init_ok}" != "true" ]; then
+                echo "  [9/10] Disk utilization check... SKIP (disk init failed)"
+                validations+=("{\"phase\": \"disk_util\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
+            else
+                echo "  [9/10] Disk utilization check (expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)..."
+                local util_json
+                util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
+                local guest_used_gb
+                guest_used_gb=$(echo "${util_json}" | grep -oP '"usedGB"\s*:\s*\K[0-9]+' || echo "0")
+                guest_used_gb=${guest_used_gb:-0}
+
+                local util_tolerance=$((expected_disk_util_gb * disk_util_tolerance_pct / 100))
+                [ "${util_tolerance}" -lt 1 ] && util_tolerance=1
+                local util_diff=$((expected_disk_util_gb - guest_used_gb))
+                [ "${util_diff}" -lt 0 ] && util_diff=$((-util_diff))
+
+                if [ "${util_diff}" -le "${util_tolerance}" ]; then
+                    echo "    PASS: Disk utilization ${guest_used_gb}GB (expected ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)"
+                    log_validation_checkpoint "disk_util" "PASS" "Used ${guest_used_gb}GB"
+                    validations+=("{\"phase\": \"disk_util\", \"status\": \"PASS\", \"message\": \"Used: ${guest_used_gb}GB, Expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                else
+                    echo "    FAIL: Disk utilization ${guest_used_gb}GB (expected ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)"
+                    log_validation_checkpoint "disk_util" "FAIL" "Used ${guest_used_gb}GB vs expected ${expected_disk_util_gb}GB"
+                    validations+=("{\"phase\": \"disk_util\", \"status\": \"FAIL\", \"message\": \"Used: ${guest_used_gb}GB, Expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                    overall_status="FAILED"
+                fi
+            fi
+        else
+            echo "  [9/10] Disk utilization check... SKIP"
+            validations+=("{\"phase\": \"disk_util\", \"status\": \"SKIP\", \"message\": \"validateDiskUtil=false\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 10: Post-process disk utilization
+        # ──────────────────────────────────────
+        if [ "${validate_disk_util_after}" = "true" ]; then
+            if [ "${disk_init_ok}" != "true" ]; then
+                echo "  [10/10] Post-process disk utilization... SKIP (disk init failed)"
+                validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
+            elif [ -z "${wait_process_name}" ]; then
+                echo "  [10/10] Post-process disk utilization... SKIP (no waitProcessName specified)"
+                validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"SKIP\", \"message\": \"waitProcessName is empty\"}")
+            else
+                echo "  [10/10] Post-process disk utilization (waiting for '${wait_process_name}' to finish, timeout ${wait_process_timeout}m)..."
+                local max_polls=$((wait_process_timeout * 2))
+                local poll
+                local process_done="false"
+                for ((poll = 1; poll <= max_polls; poll++)); do
+                    # Build the process check command dynamically from the process name
+                    local proc_check_cmd
+                    proc_check_cmd="powershell.exe -NoProfile -Command \"@(Get-Process -Name '${wait_process_name}' -ErrorAction SilentlyContinue).Count + @(Get-ScheduledTask | Where-Object { \\\$_.TaskName -like '*${wait_process_name}*' -and \\\$_.State -eq 'Running' }).Count\""
+                    local running_count
+                    running_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${proc_check_cmd}" 2>/dev/null || echo "0")
+                    running_count=$(echo "${running_count}" | head -1 | tr -cd '0-9')
+                    running_count=${running_count:-0}
+
+                    if [ "${running_count}" -eq 0 ]; then
+                        process_done="true"
+                        echo "    Process '${wait_process_name}' is no longer running (poll ${poll}/${max_polls})"
+                        break
+                    fi
+                    echo "    ... '${wait_process_name}' still running (count=${running_count}), poll ${poll}/${max_polls}, sleeping 30s"
+                    sleep 30
+                done
+
+                if [ "${process_done}" = "true" ]; then
+                    # Measure disk utilization now
+                    local post_util_json
+                    post_util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
+                    local post_used_gb
+                    post_used_gb=$(echo "${post_util_json}" | grep -oP '"usedGB"\s*:\s*\K[0-9]+' || echo "0")
+                    post_used_gb=${post_used_gb:-0}
+
+                    local post_tolerance=$((expected_disk_util_after_gb * disk_util_tolerance_pct / 100))
+                    [ "${post_tolerance}" -lt 1 ] && post_tolerance=1
+                    local post_diff=$((expected_disk_util_after_gb - post_used_gb))
+                    [ "${post_diff}" -lt 0 ] && post_diff=$((-post_diff))
+
+                    local elapsed_polls_min=$(( (poll - 1) * 30 / 60 ))
+                    if [ "${post_diff}" -le "${post_tolerance}" ]; then
+                        echo "    PASS: Post-process disk utilization ${post_used_gb}GB after ${elapsed_polls_min}m (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)"
+                        log_validation_checkpoint "disk_util_after_process" "PASS" "Used ${post_used_gb}GB after ${elapsed_polls_min}m"
+                        validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"PASS\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; used ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)\"}")
+                    else
+                        echo "    FAIL: Post-process disk utilization ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)"
+                        log_validation_checkpoint "disk_util_after_process" "FAIL" "Used ${post_used_gb}GB vs expected ${expected_disk_util_after_gb}GB"
+                        validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"FAIL\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; used ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)\"}")
+                        overall_status="FAILED"
+                    fi
+                else
+                    echo "    FAIL: Process '${wait_process_name}' did not exit within ${wait_process_timeout}m"
+                    log_validation_checkpoint "disk_util_after_process" "FAIL" "Process ${wait_process_name} timeout after ${wait_process_timeout}m"
+                    validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"FAIL\", \"message\": \"Process ${wait_process_name} did not exit within ${wait_process_timeout}m\"}")
+                    overall_status="FAILED"
+                fi
+            fi
+        else
+            echo "  [10/10] Post-process disk utilization... SKIP"
+            validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"SKIP\", \"message\": \"validateDiskUtilAfterProcess=false\"}")
+        fi
+    done
+
+    # Build final JSON report
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    log_validation_end "${overall_status}" "${duration}s"
+
+    local params_json
+    params_json=$(cat <<PARAMS
+{
+    "label_key": "${label_key}",
+    "label_value": "${label_value}",
+    "vm_count": ${vm_count},
+    "cpuCores": ${expected_cpu},
+    "memory": "${expected_memory}",
+    "dataDisks": ${expected_data_disks},
+    "diskSize": "${expected_disk_size}",
+    "expectedNICs": ${expected_nics},
+    "total_duration_seconds": ${duration}
+}
+PARAMS
+    )
+
+    # Assemble validations array
+    local validations_json="["
+    local first="true"
+    for v in "${validations[@]}"; do
+        if [ "${first}" = "true" ]; then
+            validations_json+="${v}"
+            first="false"
+        else
+            validations_json+=",${v}"
+        fi
+    done
+    validations_json+="]"
+
+    save_validation_report "windows-vm" "${overall_status}" "${namespace}" "${params_json}" "${validations_json}" "${results_dir}"
+
+    echo ""
+    echo "=============================================="
+    echo "  Windows VM Validation: ${overall_status}"
+    echo "  Duration: ${duration}s"
+    echo "=============================================="
+
+    if [ "${overall_status}" = "SUCCESS" ]; then
+        return 0
+    fi
+    return 1
+}
+
 # Check NIC hot-plug with comprehensive validation
 check_nic_hotplug() {
     local label_key="$1"
@@ -2570,8 +3091,12 @@ case "$1" in
         shift
         retry_validation check_hammerdb_mssql "$@"
         ;;
+    check_windows_vm)
+        shift
+        retry_validation check_windows_vm "$@"
+        ;;
     *)
-        echo "Usage: $0 {check_vm_running|check_vm_shutdown|check_resize|check_cpu_limits|check_memory_limits|check_disk_limits|check_disk_hotplug|check_nic_hotplug|check_performance_metrics|check_high_memory|check_large_disk|check_hammerdb_mssql} [args...]"
+        echo "Usage: $0 {check_vm_running|check_vm_shutdown|check_resize|check_cpu_limits|check_memory_limits|check_disk_limits|check_disk_hotplug|check_nic_hotplug|check_performance_metrics|check_high_memory|check_large_disk|check_hammerdb_mssql|check_windows_vm} [args...]"
         exit 1
         ;;
 esac
