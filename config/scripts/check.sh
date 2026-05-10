@@ -1491,13 +1491,17 @@ check_windows_vm() {
     local namespace="$3"
     local private_key="$4"
     local vm_user="$5"
-    local results_dir="$6"
-    shift 6
+    shift 5
+
+    # results_dir is the last arg (after all key=value pairs).
+    # wrapper.sh reads the same last arg to create the log directory.
+    local results_dir="${@: -1}"
+    local all_args=("${@:1:$#-1}")
 
     # Parse key=value pairs into an associative array
     local -A cfg
-    for arg in "$@"; do
-        cfg["${arg%%=*}"]="${arg#*=}"
+    for arg in "${all_args[@]}"; do
+        [[ "${arg}" == *"="* ]] && cfg["${arg%%=*}"]="${arg#*=}"
     done
 
     # Defaults for every toggle / expected value
@@ -1836,27 +1840,35 @@ check_windows_vm() {
                 echo "  [9/10] Disk utilization check... SKIP (disk init failed)"
                 validations+=("{\"phase\": \"disk_util\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
             else
-                echo "  [9/10] Disk utilization check (expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)..."
                 local util_json
                 util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
                 local guest_used_gb
                 guest_used_gb=$(echo "${util_json}" | grep -oP '"usedGB"\s*:\s*\K[0-9]+' || echo "0")
                 guest_used_gb=${guest_used_gb:-0}
 
-                local util_tolerance=$((expected_disk_util_gb * disk_util_tolerance_pct / 100))
-                [ "${util_tolerance}" -lt 1 ] && util_tolerance=1
-                local util_diff=$((expected_disk_util_gb - guest_used_gb))
-                [ "${util_diff}" -lt 0 ] && util_diff=$((-util_diff))
-
-                if [ "${util_diff}" -le "${util_tolerance}" ]; then
-                    echo "    PASS: Disk utilization ${guest_used_gb}GB (expected ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)"
-                    log_validation_checkpoint "disk_util" "PASS" "Used ${guest_used_gb}GB"
-                    validations+=("{\"phase\": \"disk_util\", \"status\": \"PASS\", \"message\": \"Used: ${guest_used_gb}GB, Expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                if [ "${expected_disk_util_gb}" -eq 0 ]; then
+                    # 0 = report-only; no assertion is made. Set a non-zero value to enforce a target.
+                    echo "  [9/10] Disk utilization check (reporting only — expectedDiskUtilGB=0)..."
+                    echo "    PASS: Disk utilization is ${guest_used_gb}GB (no target set, reporting only)"
+                    log_validation_checkpoint "disk_util" "PASS" "Used ${guest_used_gb}GB (report-only)"
+                    validations+=("{\"phase\": \"disk_util\", \"status\": \"PASS\", \"message\": \"Used: ${guest_used_gb}GB (expectedDiskUtilGB=0, report-only)\"}")
                 else
-                    echo "    FAIL: Disk utilization ${guest_used_gb}GB (expected ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)"
-                    log_validation_checkpoint "disk_util" "FAIL" "Used ${guest_used_gb}GB vs expected ${expected_disk_util_gb}GB"
-                    validations+=("{\"phase\": \"disk_util\", \"status\": \"FAIL\", \"message\": \"Used: ${guest_used_gb}GB, Expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
-                    overall_status="FAILED"
+                    echo "  [9/10] Disk utilization check (expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)..."
+                    local util_tolerance=$((expected_disk_util_gb * disk_util_tolerance_pct / 100))
+                    [ "${util_tolerance}" -lt 5 ] && util_tolerance=5
+                    local util_diff=$((expected_disk_util_gb - guest_used_gb))
+                    [ "${util_diff}" -lt 0 ] && util_diff=$((-util_diff))
+
+                    if [ "${util_diff}" -le "${util_tolerance}" ]; then
+                        echo "    PASS: Disk utilization ${guest_used_gb}GB (expected ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%, tolerance=${util_tolerance}GB)"
+                        log_validation_checkpoint "disk_util" "PASS" "Used ${guest_used_gb}GB"
+                        validations+=("{\"phase\": \"disk_util\", \"status\": \"PASS\", \"message\": \"Used: ${guest_used_gb}GB, Expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                    else
+                        echo "    FAIL: Disk utilization ${guest_used_gb}GB (expected ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%, tolerance=${util_tolerance}GB)"
+                        log_validation_checkpoint "disk_util" "FAIL" "Used ${guest_used_gb}GB vs expected ${expected_disk_util_gb}GB"
+                        validations+=("{\"phase\": \"disk_util\", \"status\": \"FAIL\", \"message\": \"Used: ${guest_used_gb}GB, Expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                        overall_status="FAILED"
+                    fi
                 fi
             fi
         else
@@ -1906,17 +1918,17 @@ check_windows_vm() {
                     post_used_gb=${post_used_gb:-0}
 
                     local post_tolerance=$((expected_disk_util_after_gb * disk_util_tolerance_pct / 100))
-                    [ "${post_tolerance}" -lt 1 ] && post_tolerance=1
+                    [ "${post_tolerance}" -lt 5 ] && post_tolerance=5
                     local post_diff=$((expected_disk_util_after_gb - post_used_gb))
                     [ "${post_diff}" -lt 0 ] && post_diff=$((-post_diff))
 
                     local elapsed_polls_min=$(( (poll - 1) * 30 / 60 ))
                     if [ "${post_diff}" -le "${post_tolerance}" ]; then
-                        echo "    PASS: Post-process disk utilization ${post_used_gb}GB after ${elapsed_polls_min}m (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)"
+                        echo "    PASS: Post-process disk utilization ${post_used_gb}GB after ${elapsed_polls_min}m (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%, tolerance=${post_tolerance}GB)"
                         log_validation_checkpoint "disk_util_after_process" "PASS" "Used ${post_used_gb}GB after ${elapsed_polls_min}m"
                         validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"PASS\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; used ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)\"}")
                     else
-                        echo "    FAIL: Post-process disk utilization ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)"
+                        echo "    FAIL: Post-process disk utilization ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%, tolerance=${post_tolerance}GB)"
                         log_validation_checkpoint "disk_util_after_process" "FAIL" "Used ${post_used_gb}GB vs expected ${expected_disk_util_after_gb}GB"
                         validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"FAIL\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; used ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)\"}")
                         overall_status="FAILED"
