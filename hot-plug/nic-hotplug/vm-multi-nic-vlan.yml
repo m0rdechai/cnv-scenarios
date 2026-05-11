@@ -79,7 +79,7 @@ spec:
             password: redhat
             chpasswd: { expire: False }
             ssh_authorized_keys:
-              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC4kh+H3hpwMejhFoitUbuoAyNN0T87PwR1fx75FbpZnAXWWAIENmexd9gMnpVE+0/Q768OC18TcwpdX+fJaTY3N8QFLrXsRcG+scC3wC5VmbfhMgn5Fqce97h5Rp5EftdvL1so6ITAKWraZKCD4k935L+OfverVEupAcvqPz9sxMovr2cQwwFPO8Rseqpl3jtm9qfcoNqNIJ9TNmCRgvmUe3UHYaU0PCTpEOqf0NiLUnma9pZWUL/jcfV0n0Qo1/fnFxqHLUXHkg9ECNd255uP4dduzQiIbpLPUM80Aq+9hcsCvppMdWV7dJ4J2aqz2+kvp8i4scdMe+8WK
+              - {{ .publicKey | ReadFile }}
         name: cloudinitdisk
   dataVolumeTemplates:
   - metadata:

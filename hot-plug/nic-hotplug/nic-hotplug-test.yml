@@ -169,6 +169,7 @@ jobs:
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
+      publicKey: {{ .publicKey }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
   # Create VM with VLAN Bridge NICs
@@ -186,6 +187,7 @@ jobs:
         nodeSelector: {{ .nodeSelector | default "" }}
         sshPublicKeySecret: {{ $sshPublicKeySecretName }}
         counter: {{ .counter | toString }}
+        publicKey: {{ .publicKey }}
         vmLabels:
           {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
 
