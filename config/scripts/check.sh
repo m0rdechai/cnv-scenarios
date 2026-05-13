@@ -384,12 +384,15 @@ check_cpu_limits() {
     local stress_ng_validation_status="SKIP"
     local overall_status="SUCCESS"
 
+
     # Phase 2: Check VM spec total vCPUs (cores * sockets)
     echo ""
     echo "[Phase 2/4] Checking VM spec vCPU count..."
     for vm in ${vms}; do
         echo "  Checking ${vm}..."
 
+
+        
         local spec_cores spec_sockets actual_cpu
         spec_cores=$(oc get vm -n "${namespace}" "${vm}" -o jsonpath='{.spec.template.spec.domain.cpu.cores}')
         spec_sockets=$(oc get vm -n "${namespace}" "${vm}" -o jsonpath='{.spec.template.spec.domain.cpu.sockets}')
@@ -398,6 +401,8 @@ check_cpu_limits() {
         actual_cpu=$(( spec_cores * spec_sockets ))
 
 
+
+        
         if [ "${actual_cpu}" != "${expected_cpu}" ]; then
             echo "  ✗ ${vm}: vCPU count mismatch. Expected: ${expected_cpu}, Actual: ${actual_cpu} (cores=${spec_cores} * sockets=${spec_sockets})"
             log_validation_checkpoint "vm_spec_cpu_count" "FAIL" "Expected ${expected_cpu}, got ${actual_cpu} (${spec_cores}c x ${spec_sockets}s)"

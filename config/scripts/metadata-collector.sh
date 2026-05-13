@@ -364,6 +364,7 @@ done < <(find "$search_dir" -name "validation-*.json" -type f -print0 2>/dev/nul
 
 if [[ ${#val_files[@]} -gt 0 ]]; then
     for vf in "${val_files[@]}"; do
+        file_status=$(jq -r '.overallStatus // .status // "UNKNOWN"' "$vf" 2>/dev/null)
         file_validations=$(jq -r '.validations // []' "$vf" 2>/dev/null)
 
         count=$(echo "$file_validations" | jq 'length' 2>/dev/null || echo 0)
