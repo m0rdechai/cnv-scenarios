@@ -61,6 +61,18 @@ MAX_SHORT_WAITS=12
 SHORT_WAIT=5
 LONG_WAIT=30
 
+# Require virtctl >= 1.6 (vm/ prefix syntax for ssh)
+VIRTCTL_VERSION=$(virtctl version --client 2>/dev/null | grep -oP 'GitVersion:"v\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+VIRTCTL_MAJOR=$(echo "${VIRTCTL_VERSION}" | cut -d. -f1)
+VIRTCTL_MINOR=$(echo "${VIRTCTL_VERSION}" | cut -d. -f2)
+if [ -z "${VIRTCTL_VERSION}" ]; then
+    echo "ERROR: virtctl not found or version unreadable"
+    exit 1
+elif [ "${VIRTCTL_MAJOR:-0}" -lt 1 ] || { [ "${VIRTCTL_MAJOR}" -eq 1 ] && [ "${VIRTCTL_MINOR:-0}" -lt 6 ]; }; then
+    echo "ERROR: virtctl >= 1.6 required (found v${VIRTCTL_VERSION}). SSH target format changed in 1.6."
+    exit 1
+fi
+
 # Check if virtctl supports --local-ssh flag
 if virtctl ssh --help | grep -qc "\--local-ssh " ; then
     LOCAL_SSH="--local-ssh"
@@ -240,17 +252,19 @@ check_cpu_limits() {
     local label_key="$1"
     local label_value="$2"
     local namespace="$3"
-    local expected_cpu="$4"
-    local private_key="$5"
-    local vm_user="$6"
-    local results_dir="${7:-/tmp/kube-burner-validations}"
+    local expected_cores="${4:-1}"
+    local expected_sockets="${5:-1}"
+    local private_key="$6"
+    local vm_user="$7"
+    local results_dir="${8:-/tmp/kube-burner-validations}"
+    local expected_cpu=$(( expected_cores * expected_sockets ))
     
     echo "=============================================="
     echo "  CPU Limits Validation"
     echo "=============================================="
     echo "Namespace: ${namespace}"
     echo "Label: ${label_key}=${label_value}"
-    echo "Expected CPU Cores: ${expected_cpu}"
+    echo "Expected vCPUs: ${expected_cpu} (${expected_cores}c x ${expected_sockets}s)"
     echo "SSH User: ${vm_user}"
     echo "Results: ${results_dir}"
     echo "----------------------------------------------"
@@ -279,23 +293,27 @@ check_cpu_limits() {
     local stress_ng_validation_status="SKIP"
     local overall_status="SUCCESS"
     
-    # Phase 2: Check VM spec CPU cores
+    # Phase 2: Check VM spec total vCPUs (cores * sockets)
     echo ""
-    echo "[Phase 2/4] Checking VM spec CPU cores..."
+    echo "[Phase 2/4] Checking VM spec vCPU count..."
     for vm in ${vms}; do
         echo "  Checking ${vm}..."
         
-        local actual_cpu
-        actual_cpu=$(oc get vm -n "${namespace}" "${vm}" -o jsonpath='{.spec.template.spec.domain.cpu.cores}')
+        local spec_cores spec_sockets actual_cpu
+        spec_cores=$(oc get vm -n "${namespace}" "${vm}" -o jsonpath='{.spec.template.spec.domain.cpu.cores}')
+        spec_sockets=$(oc get vm -n "${namespace}" "${vm}" -o jsonpath='{.spec.template.spec.domain.cpu.sockets}')
+        spec_cores=${spec_cores:-1}
+        spec_sockets=${spec_sockets:-1}
+        actual_cpu=$(( spec_cores * spec_sockets ))
         
         if [ "${actual_cpu}" != "${expected_cpu}" ]; then
-            echo "  ✗ ${vm}: CPU cores mismatch. Expected: ${expected_cpu}, Actual: ${actual_cpu}"
-            log_validation_checkpoint "vm_spec_cpu_cores" "FAIL" "Expected ${expected_cpu}, got ${actual_cpu}"
+            echo "  ✗ ${vm}: vCPU count mismatch. Expected: ${expected_cpu}, Actual: ${actual_cpu} (cores=${spec_cores} * sockets=${spec_sockets})"
+            log_validation_checkpoint "vm_spec_cpu_count" "FAIL" "Expected ${expected_cpu}, got ${actual_cpu} (${spec_cores}c x ${spec_sockets}s)"
             overall_status="FAILED"
             break
         fi
-        echo "  ✓ ${vm}: ${actual_cpu} CPU cores in spec"
-        log_validation_checkpoint "vm_spec_cpu_cores" "PASS" "VM ${vm}: ${actual_cpu} CPU cores in spec"
+        echo "  ✓ ${vm}: ${actual_cpu} vCPUs in spec (cores=${spec_cores} * sockets=${spec_sockets})"
+        log_validation_checkpoint "vm_spec_cpu_count" "PASS" "VM ${vm}: ${actual_cpu} vCPUs (${spec_cores}c x ${spec_sockets}s)"
     done
     
     # Phase 3: Guest OS CPU validation
@@ -402,7 +420,7 @@ check_cpu_limits() {
 {
     "label_key": "${label_key}",
     "label_value": "${label_value}",
-    "expected_cpu_cores": ${expected_cpu},
+    "expected_vcpus": ${expected_cpu},
     "vm_count": ${vm_count},
     "ssh_validation_enabled": $([ -n "${private_key}" ] && echo "true" || echo "false"),
     "total_duration_seconds": ${duration}
@@ -433,7 +451,7 @@ PARAMS
     validations_json=$(cat <<VALIDATIONS
 [
     {"phase": "vm_discovery", "status": "PASS", "message": "Found ${vm_count} VMs"},
-    {"phase": "vm_spec_cpu_cores", "status": "${spec_status}", "message": "VM spec CPU cores validation (${expected_cpu} cores)"},
+    {"phase": "vm_spec_cpu_count", "status": "${spec_status}", "message": "VM spec vCPU count validation (${expected_cpu} vCPUs via sockets topology)"},
     {"phase": "guest_os_cpu_count", "status": "${guest_os_validation_status}", "message": "${guest_os_msg}"},
     {"phase": "stress_ng_processes", "status": "${stress_ng_validation_status}", "message": "${stress_ng_msg}"}
 ]

@@ -71,7 +71,7 @@ spec:
             password: fedora
             chpasswd: { expire: False }
             ssh_authorized_keys:
-              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... # Add your SSH key here
+              - {{ .publicKey | ReadFile }}
             runcmd:
               # Install memory testing tools
               - dnf install -y stress-ng htop free

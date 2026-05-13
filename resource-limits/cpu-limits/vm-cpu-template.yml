@@ -32,12 +32,15 @@ spec:
         {{ .nodeSelector }}
       {{- end }}
       domain:
+        {{- if eq (.bootloaderEfi | toString) "true" }}
+        firmware:
+          bootloader:
+            efi: {}
+        {{- end }}
         cpu:
           cores: {{.cpuCores}}
-          # Enable CPU pinning for high CPU count tests
-          {{- if gt (.cpuCores | int) 16 }}
-          dedicatedCpuPlacement: true
-          {{- end }}
+          sockets: {{.cpuSockets}}
+          maxSockets: {{.cpuMaxSockets}}
         devices:
           disks:
           - disk:
@@ -55,9 +58,6 @@ spec:
         resources:
           requests:
             memory: {{.memory}}
-            {{- if gt (.cpuCores | int) 16 }}
-            cpu: {{.cpuCores}}
-            {{- end }}
       networks:
       - name: default
         pod: {}
@@ -72,12 +72,12 @@ spec:
             password: fedora
             chpasswd: { expire: False }
             ssh_authorized_keys:
-              - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC... # Add your SSH key here
+              - {{ .publicKey | ReadFile }}
             runcmd:
               # Install stress-ng for CPU testing
               - dnf install -y stress-ng htop
-              # Start CPU stress test matching the number of cores
-              - nohup stress-ng --cpu {{.cpuCores}} --timeout 0 &
+              # Start CPU stress test on all vCPUs (cores * sockets)
+              - nohup stress-ng --cpu $(nproc) --timeout 0 &
         name: cloudinitdisk
   dataVolumeTemplates:
   - metadata:

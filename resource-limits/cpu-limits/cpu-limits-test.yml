@@ -68,7 +68,7 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_cpu_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .cpuCores | default 1 }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "../../config/scripts/wrapper.sh check_cpu_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .cpuCores | default 1 }} {{ .cpuSockets | default 1 }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true
@@ -87,8 +87,10 @@ jobs:
       counter: {{ .counter | toString }}
       OS: fedora
       url: {{ .imageUrl | default "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2" }}
-      # CPU cores - can be overridden via CLI
       cpuCores: {{ .cpuCores | default 1 }}
+      cpuSockets: {{ .cpuSockets | default 1 }}
+      cpuMaxSockets: {{ .cpuMaxSockets | default 1 }}
+      bootloaderEfi: {{ .bootloaderEfi | default false }}
       memory: {{ .memory | default "2Gi" }}
       storage: {{ .storage | default "10Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
@@ -96,5 +98,6 @@ jobs:
       VMIrunning: {{ .vmRunning | default true }}
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      publicKey: {{ .publicKey }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}

@@ -95,5 +95,6 @@ jobs:
       VMIrunning: {{ .vmRunning | default true }}
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      publicKey: {{ .publicKey }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
