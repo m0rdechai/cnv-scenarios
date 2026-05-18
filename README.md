@@ -106,6 +106,7 @@ Results are automatically saved to timestamped directories:
 | Performance | minimal-resources | `./run-workloads.sh minimal-resources` |
 | Scale | per-host-density | `./run-workloads.sh per-host-density` |
 | Scale | virt-capacity-benchmark | `./run-workloads.sh virt-capacity-benchmark` |
+| Database | hammerdb-mssql | `./run-workloads.sh hammerdb-mssql` |
 
 ## Directory Structure
 
@@ -137,10 +138,12 @@ cnv-scenarios/
 ├── hot-plug/                         # Hot-plug functionality tests
 │   ├── disk-hotplug/                 # Disk hot-plug testing
 │   └── nic-hotplug/                  # NIC hot-plug testing
-└── performance/                      # Performance validation tests
-    ├── high-memory/                  # High memory allocation
-    ├── large-disk/                   # Large disk performance
-    └── minimal-resources/            # Minimal resource efficiency
+├── performance/                      # Performance validation tests
+│   ├── high-memory/                  # High memory allocation
+│   ├── large-disk/                   # Large disk performance
+│   └── minimal-resources/            # Minimal resource efficiency
+└── database/                         # Database workload tests
+    └── hammerdb-mssql/               # Windows MSSQL + HammerDB TPC-C benchmark
 ```
 
 > **For Contributors:** See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed documentation on how `run-workloads.sh` and validation scripts work.
@@ -530,6 +533,63 @@ minMemory=256Mi ./run-workloads.sh minimal-resources
 
 **Note:** Uses `sshpass` for password-based SSH (no SSH keys required). Ensure `sshpass` is installed on the test runner.
 
+## Database Testing
+
+### HammerDB / MSSQL
+
+Run a Windows Server VM with SQL Server and HammerDB performing a TPC-C benchmark. Validates the full lifecycle: VM shape, SSH connectivity, MSSQL service state, disk initialization, and post-benchmark disk utilization.
+
+**Prerequisites:** Requires a pre-built Windows container disk image with SQL Server, HammerDB, and OpenSSH installed. See [docs/windows-image-build.md](docs/windows-image-build.md).
+
+```bash
+# Set the Windows image URL (required — no default)
+windowsImageUrl=docker://registry.example.com/windows-mssql:latest ./run-workloads.sh hammerdb-mssql
+
+# Sanity mode (validates shape and SSH; shorter wait timeouts)
+windowsImageUrl=docker://... ./run-workloads.sh hammerdb-mssql --mode sanity
+
+# Override CPU / memory / disk layout
+windowsImageUrl=docker://... cpuCores=16 memory=32Gi dataDisks=5 diskSize=200Gi ./run-workloads.sh hammerdb-mssql
+```
+
+**Validation flow — `check_windows_vm` (10 phases):**
+
+| Phase | Name | What Is Checked | Controlled By |
+|-------|------|-----------------|---------------|
+| 1 | SSH check | `virtctl ssh` connectivity | `validateSSH` |
+| 2 | OS check | `Win32_OperatingSystem.Caption` contains `expectedOS` | `validateOS`, `expectedOS` |
+| 3 | App check | Each Windows service in `validateApps` is `Running` | `validateApps` (comma-separated) |
+| 4 | CPU check | Logical CPU count equals `cpuCores` | `validateCPU`, `cpuCores` |
+| 5 | Memory check | RAM within 5% of `memory` | `validateMemory`, `memory` |
+| 6 | NIC check | Active IPv4 NIC count equals `expectedNICs` | `validateNICs`, `expectedNICs` |
+| 7 | Disk init | Brings offline/RAW data disks online, GPT-partitions, NTFS-formats (idempotent) | `initializeDisks` |
+| 8 | Disk count/size | Non-system disk count and total size match `dataDisks × diskSize` (5% tolerance) | `validateDisks`, `dataDisks`, `diskSize` |
+| 9 | Disk utilization | Measures used space on non-C: volumes; asserts against `expectedDiskUtilGB` or reports only when `0` | `validateDiskUtil`, `expectedDiskUtilGB`, `diskUtilTolerancePct` |
+| 10 | Post-process util | Waits for `waitProcessName` to exit (polling every 30s up to `waitProcessTimeout` minutes), then asserts disk utilization matches `expectedDiskUtilAfterProcessGB` | `validateDiskUtilAfterProcess`, `waitProcessName`, `waitProcessTimeout`, `expectedDiskUtilAfterProcessGB` |
+
+Phases 8–10 are gated on Phase 7. If disk initialization fails, all downstream disk phases are skipped and reported as `SKIP`.
+
+All phases are individually toggle-able via `vars.yml`. Setting a toggle to `false` records `SKIP` in the JSON report and does not affect `overall_status`.
+
+**Key parameters (`vars.yml`):**
+
+```yaml
+cpuCores: 8           # vCPUs — drives both VM spec and Phase 4 assertion
+memory: "16Gi"        # RAM — drives both VM spec and Phase 5 assertion
+dataDisks: 3          # Blank DataVolumes attached — drives VM spec and Phase 8 assertion
+diskSize: "100Gi"     # Per-disk size — drives both VM spec and Phase 8 assertion
+expectedOS: "Windows Server 2022"   # Substring matched against OS caption (case-insensitive)
+validateApps: "MSSQLSERVER"         # Windows service(s) to verify Running
+waitProcessName: "hammerdb"         # Process/scheduled-task name to wait for before Phase 10
+waitProcessTimeout: 45              # Max minutes to wait
+expectedDiskUtilAfterProcessGB: 70  # Expected GB used after HammerDB finishes
+diskUtilTolerancePct: 30            # % tolerance on disk utilization assertions
+```
+
+> **Multi-word `expectedOS` values** are safe to use in `vars.yml`. The `beforeCleanup` command template automatically encodes spaces as underscores before passing to the script, which decodes them back. Do not use underscores in OS names that actually contain underscores.
+
+**Validation report:** `validation-windows-vm.json` in the results directory.
+
 ## Validation and Results
 
 ### Validation JSON Reports
@@ -598,6 +658,7 @@ All validation functions are wrapped by a retry mechanism (up to 130 retries wit
 | `check_high_memory` | High memory allocation + guest OS (`free -m`) | Yes (key-based) | 15% tolerance |
 | `check_large_disk` | Large disk visibility + size in guest OS (`lsblk`) | Yes (key-based) | 4-phase validation |
 | `check_performance_metrics` | System responsiveness (`uptime`, `free -m`, `uname`) | Yes (password-based) | For CirrOS VMs via sshpass |
+| `check_windows_vm` | 10-phase Windows VM validation: SSH, OS version, services, CPU, memory, NICs, disk init, disk count/size, disk utilization, post-process utilization | Yes (key-based, `virtctl ssh` + PowerShell) | `key=value` arg pattern; all phases individually toggle-able; see [Database Testing](#database-testing) |
 
 ## Advanced Usage
 
@@ -889,3 +950,4 @@ oc get vmis -n <namespace>
 | Performance | Large Disk | large-disk-performance.yml | `largeDiskSize=100Ti` |
 | Performance | High Memory | high-memory-performance.yml | `highMemory=450Gi` |
 | Performance | Minimal | minimal-resources-test.yml | `minMemory=128Mi minCpu=100m minStorage=1Gi` |
+| Database | HammerDB/MSSQL | hammerdb-mssql-test.yml | `cpuCores=8 memory=16Gi dataDisks=3 diskSize=100Gi windowsImageUrl=docker://...` |

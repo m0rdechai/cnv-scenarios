@@ -260,6 +260,7 @@ LONG_WAIT=30         # Seconds between later retries
 | `check_large_disk` | Validates large disk visibility (4 phases) | label_key, label_value, namespace, disk_size, private_key, vm_user, results_dir |
 | `check_high_memory` | Validates high memory allocation with tolerance | label_key, label_value, namespace, memory_size, private_key, vm_user, results_dir |
 | `check_performance_metrics` | Validates CirrOS VMs (password-based SSH) | label_key, label_value, namespace, vm_password, vm_user, results_dir |
+| `check_windows_vm` | 10-phase Windows VM validation via `virtctl ssh` + PowerShell | label_key, label_value, namespace, private_key, vm_user, [key=value …], results_dir |
 
 **Validation Flow Example (check_memory_limits):**
 ```
@@ -268,6 +269,42 @@ Phase 2/4: Check VM spec memory configuration
 Phase 3/4: SSH into guest, verify memory via `free -m` (15% tolerance)
 Phase 4/4: Check stress-ng processes (if applicable)
 ```
+
+**Validation Flow: `check_windows_vm` (10 phases)**
+
+`check_windows_vm` uses a `key=value` argument pattern rather than positional parameters so that new phases can be added without breaking existing callers. All phases after the five fixed positional args (`label_key`, `label_value`, `namespace`, `private_key`, `vm_user`) are parsed from `key=value` pairs; the last argument is always `results_dir`.
+
+```
+Phase 1:  SSH check           — echo SSH_OK over virtctl ssh; gates all subsequent phases
+Phase 2:  OS check            — Win32_OperatingSystem.Caption contains expectedOS (case-insensitive)
+Phase 3:  App check           — each service in validateApps (comma-separated) is Running
+Phase 4:  CPU check           — logical CPU count == cpuCores (exact)
+Phase 5:  Memory check        — TotalPhysicalMemory within 5% of memory
+Phase 6:  NIC check           — count of Up NICs with IPv4 == expectedNICs (exact)
+Phase 7:  Disk init (action)  — bring offline/RAW disks online, GPT-partition, NTFS-format; idempotent
+Phase 8:  Disk count/size     — non-system disk count == dataDisks; total size within 5% of dataDisks×diskSize
+Phase 9:  Disk utilization    — used space on non-C: volumes; asserts vs expectedDiskUtilGB (0 = report-only)
+Phase 10: Post-process util   — polls for waitProcessName exit; asserts disk util vs expectedDiskUtilAfterProcessGB
+```
+
+Phases 8, 9, and 10 are gated on Phase 7 (`disk_init_ok` flag). A failed or skipped Phase 7 causes all three downstream phases to report `SKIP` and does not set `overall_status = FAILED`.
+
+**`beforeCleanup` multi-word value encoding**
+
+Go template expansion happens before shell word-splitting, so a value like `expectedOS=Windows Server 2022` becomes three separate shell tokens and the parser only sees `expectedOS=Windows`. The convention used in `hammerdb-mssql-test.yml` is to encode spaces as underscores in the template and decode them in the script:
+
+```yaml
+# Template (hammerdb-mssql-test.yml)
+beforeCleanup: '... expectedOS={{ .expectedOS | default "Windows" | replace " " "_" }} ...'
+```
+
+```bash
+# Script (check_windows_vm in check.sh)
+local expected_os="${cfg[expectedOS]:-Windows}"
+expected_os="${expected_os//_/ }"   # decode underscores back to spaces
+```
+
+Apply the same encoding to any `beforeCleanup` parameter whose value may contain spaces.
 
 All validation functions are wrapped by `retry_validation()` which:
 1. Attempts validation up to `MAX_RETRIES` times
