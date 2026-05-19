@@ -151,7 +151,7 @@ jobs:
   namespacedIterations: false
   namespace: {{ $nsName }}
   maxWaitTimeout: {{ .hotplugTimeout | default "15m" }}
-  beforeCleanup: "../../config/scripts/wrapper.sh check_disk_hotplug {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ $diskCount }} {{ .pvcSize }} {{ .privateKey }} {{ .vmUser }} {{ .validatePvcBySize | default true }} {{ .validateHotplugFromOs | default true }} {{ .guestOS | default \"linux\" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: '../../config/scripts/wrapper.sh check_disk_hotplug {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ $diskCount }} {{ .pvcSize }} {{ .privateKey }} {{ .vmUser }} {{ .validatePvcBySize | default true }} {{ .validateHotplugFromOs | default true }} {{ .guestOS | default "linux" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}'
   objects:
 {{- $persist := .hotplugPersist | default true }}
 {{- $prefix := .pvcPrefix | default "hotplug-disk" }}

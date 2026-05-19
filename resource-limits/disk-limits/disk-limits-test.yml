@@ -68,7 +68,7 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_disk_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .diskCount | default 1 }} {{ .diskSize }} {{ .privateKey }} {{ .vmUser }} {{ .guestOS | default \"linux\" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: '../../config/scripts/wrapper.sh check_disk_limits {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .diskCount | default 1 }} {{ .diskSize }} {{ .privateKey }} {{ .vmUser }} {{ .guestOS | default "linux" }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}'
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true

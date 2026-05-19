@@ -488,6 +488,19 @@ run_single_test() {
     if [[ -n "${esServer:-}" ]]; then
         sed -i "s#^esServer:.*#esServer: \"${esServer}\"#" "$temp_vars"
     fi
+    # Generic env var injection: for every top-level key in the vars file, check if
+    # a matching environment variable is set and write its value into the temp file.
+    # This makes the "pass any var via env" promise in the usage comment actually work.
+    local _key
+    while IFS='' read -r _line; do
+        [[ "$_line" =~ ^([a-zA-Z][a-zA-Z0-9_]*): ]] || continue
+        _key="${BASH_REMATCH[1]}"
+        # Skip keys already handled specifically above, and runtime-computed keys
+        case "$_key" in PROM|PROM_TOKEN|esServer|resultsPath|runTimestamp) continue ;; esac
+        local _val="${!_key}"
+        [[ -z "$_val" ]] && continue
+        sed -i "s#^${_key}:.*#${_key}: \"${_val}\"#" "$temp_vars"
+    done < "$temp_vars"
 
     logmain INFO "[$test_name] Starting test"
     logmain INFO "[$test_name] Mode: $MODE"

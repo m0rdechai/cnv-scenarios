@@ -45,7 +45,7 @@ spec:
               tickPolicy: catchup
         cpu:
           cores: {{.cpuCores}}
-          sockets: 1
+          sockets: {{.cpuSockets}}
           threads: 1
           {{- if gt (.cpuCores | int) 16 }}
           dedicatedCpuPlacement: true

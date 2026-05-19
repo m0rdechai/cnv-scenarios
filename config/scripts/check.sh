@@ -346,7 +346,8 @@ check_cpu_limits() {
     local expected_sockets="${5:-1}"
     local private_key="$6"
     local vm_user="$7"
-    local results_dir="${8:-/tmp/kube-burner-validations}"
+    local guest_os="${8:-linux}"
+    local results_dir="${9:-/tmp/kube-burner-validations}"
     local expected_cpu=$(( expected_cores * expected_sockets ))
     
     echo "=============================================="
@@ -600,12 +601,8 @@ check_memory_limits() {
     local expected_memory="$4"
     local private_key="$5"
     local vm_user="$6"
-    local guest_os="linux"
-    local results_dir="${7:-/tmp/kube-burner-validations}"
-    if [[ "${#}" -ge 8 ]]; then
-        guest_os="${7}"
-        results_dir="${8}"
-    fi
+    local guest_os="${7:-linux}"
+    local results_dir="${8:-/tmp/kube-burner-validations}"
 
     echo "=============================================="
     echo "  Memory Limits Validation"
@@ -839,12 +836,8 @@ check_disk_limits() {
     local expected_disk_size="$5"
     local private_key="$6"
     local vm_user="$7"
-    local guest_os="linux"
-    local results_dir="${8:-/tmp/kube-burner-validations}"
-    if [[ "${#}" -ge 9 ]]; then
-        guest_os="${8}"
-        results_dir="${9}"
-    fi
+    local guest_os="${8:-linux}"
+    local results_dir="${9:-/tmp/kube-burner-validations}"
 
     echo "=============================================="
     echo "  Disk Limits Validation"
@@ -1123,18 +1116,8 @@ check_disk_hotplug() {
     local vm_user="$7"
     local validate_pvc_by_size="${8:-${VALIDATE_PVC_BY_SIZE:-true}}"
     local validate_hotplug_from_os="${9:-${VALIDATE_HOTPLUG_FROM_OS:-true}}"
-    local guest_os="linux"
-    local results_dir="${10:-/tmp/kube-burner-validations}"
-    if [[ "${#}" -ge 11 ]]; then
-        validate_pvc_by_size="${8}"
-        validate_hotplug_from_os="${9}"
-        guest_os="${10}"
-        results_dir="${11}"
-    elif [[ "${#}" -ge 10 ]]; then
-        validate_pvc_by_size="${8}"
-        validate_hotplug_from_os="${9}"
-        results_dir="${10}"
-    fi
+    local guest_os="${10:-linux}"
+    local results_dir="${11:-/tmp/kube-burner-validations}"
 
     echo "Checking disk hot-plug for VMs with label ${label_key}=${label_value} in namespace ${namespace}"
     echo "Expected hot-plugged disk count: ${expected_disk_count}"
@@ -2028,26 +2011,45 @@ check_nic_hotplug() {
     local private_key="${5:-}"
     local vm_user="${6:-}"
     local validate_guest_os="${7:-true}"
-    local results_dir="${8:-/tmp/kube-burner-validations}"
-    
+    local arg8="${8:-}"
+    local arg9="${9:-}"
+    local results_dir
+    local nncp_run_id=""
+    if [[ -n "${arg9}" ]]; then
+        nncp_run_id="${arg8}"
+        results_dir="${arg9}"
+    else
+        results_dir="${arg8:-/tmp/kube-burner-validations}"
+    fi
+
+    local nncp_simple_lbl="test-type=nic-hotplug-simple"
+    local nncp_vlan_lbl="test-type=nic-hotplug-vlan"
+    if [[ -n "${nncp_run_id}" ]]; then
+        nncp_simple_lbl="test-type=nic-hotplug-simple,cnv-scenarios.io/run=${nncp_run_id}"
+        nncp_vlan_lbl="test-type=nic-hotplug-vlan,cnv-scenarios.io/run=${nncp_run_id}"
+    fi
+
     echo "=========================================="
     echo "NIC Hot-plug Validation"
     echo "=========================================="
     echo "Namespace: ${namespace}"
     echo "Expected NICs: ${expected_nic_count}"
     echo "Validate Guest OS: ${validate_guest_os}"
+    if [[ -n "${nncp_run_id}" ]]; then
+        echo "NNCP run scope: cnv-scenarios.io/run=${nncp_run_id}"
+    fi
     echo ""
 
     # 1. Validate NodeNetworkConfigurationPolicies (NNCPs)
     echo "[1/5] Validating NodeNetworkConfigurationPolicies..."
 
     local nncp_simple_count
-    nncp_simple_count=$(oc get nncp -l test-type=nic-hotplug-simple --no-headers 2>/dev/null | wc -l 2>/dev/null || echo "0")
+    nncp_simple_count=$(oc get nncp -l "${nncp_simple_lbl}" --no-headers 2>/dev/null | wc -l 2>/dev/null || echo "0")
     nncp_simple_count=$(echo "${nncp_simple_count}" | head -1 | tr -cd '0-9')
     nncp_simple_count=${nncp_simple_count:-0}
 
     local nncp_vlan_count
-    nncp_vlan_count=$(oc get nncp -l test-type=nic-hotplug-vlan --no-headers 2>/dev/null | wc -l 2>/dev/null || echo "0")
+    nncp_vlan_count=$(oc get nncp -l "${nncp_vlan_lbl}" --no-headers 2>/dev/null | wc -l 2>/dev/null || echo "0")
     nncp_vlan_count=$(echo "${nncp_vlan_count}" | head -1 | tr -cd '0-9')
     nncp_vlan_count=${nncp_vlan_count:-0}
 
@@ -2082,8 +2084,8 @@ check_nic_hotplug() {
     if [ "${nncp_ready_count}" -ne "${total_nncp_count}" ]; then
         echo "  ERROR: Not all NNCPs are in Ready state"
         echo "  Degraded NNCPs:"
-        oc get nncp -l test-type=nic-hotplug-simple
-        oc get nncp -l test-type=nic-hotplug-vlan
+        oc get nncp -l "${nncp_simple_lbl}"
+        oc get nncp -l "${nncp_vlan_lbl}"
         log_validation_checkpoint "nncp_status" "FAIL" "Only ${nncp_ready_count}/${total_nncp_count} NNCPs Ready"
         return 1
     fi

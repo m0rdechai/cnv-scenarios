@@ -17,10 +17,12 @@ diskSize: "100Gi"
 storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Filesystem"
 
-# REQUIRED when running: windowsImageUrl (docker://… or http(s)://…/.qcow2)
+# REQUIRED when running: set to "docker://…" or "http(s)://….qcow2" before executing.
+# Left empty here so the template renders; the test will fail at VM creation without a real URL.
+windowsImageUrl: ""
 
-privateKey: '/home/mlehrer/.ssh/id_rsa'
-publicKey: '/home/mlehrer/.ssh/id_rsa.pub'
+privateKey: '/home/kni/.ssh/id_rsa'
+publicKey: '/home/kni/.ssh/id_rsa.pub'
 vmUser: 'Administrator'
 
 maxWaitTimeout: "45m"
