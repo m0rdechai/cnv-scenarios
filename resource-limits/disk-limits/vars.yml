@@ -30,6 +30,7 @@ vmCount: 1                                 # Number of VMs to create for testing
 # Disk Configuration
 diskCount: 1                               # Number of disks to create for each VM
 diskSize: "10Gi"                           # Disk size allocated to each VM (can test max limits - up to 100Ti per scenario)
+windowsRootDiskSize: "90Gi"               # Windows root image import size; keep separate from validated data disk size
 
 # CPU and Memory Configuration
 cpuCores: 16                               # CPU cores allocated to each VM

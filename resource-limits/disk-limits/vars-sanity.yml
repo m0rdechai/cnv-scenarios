@@ -13,6 +13,7 @@ vmCount: 1
 # Disk Configuration (minimal)
 diskCount: 2
 diskSize: "1Gi"
+windowsRootDiskSize: "90Gi"
 
 # Resource Configuration (minimal)
 cpuCores: 1

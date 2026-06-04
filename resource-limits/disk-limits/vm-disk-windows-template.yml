@@ -118,7 +118,7 @@ spec:
         - ReadWriteMany
         resources:
           requests:
-            storage: 20Gi
+            storage: {{.rootStorage}}
         storageClassName: {{.storageclass}}
         volumeMode: Block
   {{- range $i := until (.diskCount | int) }}
