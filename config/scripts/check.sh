@@ -149,8 +149,6 @@ windows_guest_cpu_count_cmd='powershell.exe -NoProfile -Command "(Get-CimInstanc
 windows_guest_memory_mb_cmd='powershell.exe -NoProfile -Command "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB)"'
 # shellcheck disable=SC2016
 windows_guest_data_disk_count_cmd='powershell.exe -NoProfile -Command "(Get-Disk | Where-Object { -not $_.IsSystem }).Count"'
-# shellcheck disable=SC2016
-windows_guest_cpu_burn_count_cmd='powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '"'"'*CNV_CPU_BURN=1*'"'"' }).Count"'
 
 # Windows guest: OS caption (e.g. "Microsoft Windows Server 2022 Datacenter")
 # shellcheck disable=SC2016
@@ -160,6 +158,13 @@ windows_guest_os_name_cmd='powershell.exe -NoProfile -Command "(Get-CimInstance 
 # shellcheck disable=SC2016
 windows_guest_nic_count_cmd='powershell.exe -NoProfile -Command "@(Get-NetAdapter | Where-Object Status -eq Up | Where-Object { Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue }).Count"'
 
+# Windows guest: filter used to exclude the validation command from self-counting
+windows_guest_cpu_burn_filter='($_.CommandLine -like '"'"'*CNV_CPU_BURN=1*'"'"') -and ($_.CommandLine -notlike '"'"'*Get-CimInstance Win32_Process*'"'"')'
+# Windows guest: detailed list of CPU burn helper processes for diagnostics
+# shellcheck disable=SC2016
+windows_guest_cpu_burn_count_cmd="powershell.exe -NoProfile -Command \"@(Get-CimInstance Win32_Process | Where-Object { ${windows_guest_cpu_burn_filter} }).Count\""
+# shellcheck disable=SC2016
+windows_guest_cpu_burn_details_cmd="powershell.exe -NoProfile -Command \"\$p = @(Get-CimInstance Win32_Process | Where-Object { ${windows_guest_cpu_burn_filter} } | Select-Object ProcessId,ParentProcessId,Name,CommandLine); if (\$p.Count -eq 0) { '[]' } else { ConvertTo-Json -Compress -InputObject @(\$p) }\""
 # Windows guest: initialize offline/RAW disks (idempotent — only touches disks that need it)
 # shellcheck disable=SC2016
 windows_guest_disk_init_cmd='powershell.exe -NoProfile -Command "Get-Disk | Where-Object { $_.OperationalStatus -eq '"'"'Offline'"'"' } | Set-Disk -IsOffline $false; Get-Disk | Where-Object { $_.IsReadOnly } | Set-Disk -IsReadOnly $false; $raw = @(Get-Disk | Where-Object { $_.PartitionStyle -eq '"'"'RAW'"'"' }); foreach ($d in $raw) { $d | Initialize-Disk -PartitionStyle GPT -PassThru | New-Partition -AssignDriveLetter -UseMaximumSize | Format-Volume -FileSystem NTFS -Confirm:$false }; Write-Output \"INITIALIZED=$($raw.Count)\""'
@@ -472,7 +477,41 @@ check_cpu_limits() {
     if [ "${overall_status}" = "SUCCESS" ] && [ -n "${private_key}" ] && [ -n "${vm_user}" ]; then
         echo ""
         if [ "${guest_os}" = "windows" ]; then
-            echo "[Phase 4/4] Checking Windows CPU burn worker processes (CNV_CPU_BURN=1)..."
+            echo "[Phase 4/4] Bootstrapping and checking Windows CPU burn workers (CNV_CPU_BURN=1)..."
+
+            # Build the bootstrap script and encode it as base64 UTF-16LE
+            # to use powershell -EncodedCommand, bypassing all SSH quoting issues.
+            local ps_script
+            # shellcheck disable=SC2016
+            ps_script='$n = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors; '
+            ps_script+='$workerCmd = "powershell.exe -NoProfile -Command `$env:CNV_CPU_BURN=1; [double]`$x=1; while(`$true){`$x=[math]::Sqrt(`$x+1)}"; '
+            ps_script+='1..$n | ForEach-Object { [void](Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}) }; '
+            ps_script+='"STARTED=$n"'
+            local encoded_bootstrap
+            encoded_bootstrap=$(printf '%s' "${ps_script}" | iconv -t UTF-16LE | base64 -w 0)
+
+            for vm in ${vms}; do
+                echo "  Bootstrapping CPU burn workers on ${vm}..."
+
+                local existing_count
+                existing_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "${windows_guest_cpu_burn_count_cmd}" 2>/dev/null || echo "0")
+                existing_count=$(echo "${existing_count}" | head -1 | tr -cd '0-9')
+                existing_count=${existing_count:-0}
+
+                if [ "${existing_count}" -ge "${expected_cpu}" ]; then
+                    echo "    Already running ${existing_count} worker(s), skipping bootstrap"
+                    continue
+                fi
+
+                local bootstrap_result
+                bootstrap_result=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "powershell.exe -NoProfile -EncodedCommand ${encoded_bootstrap}" 2>/dev/null || echo "BOOTSTRAP_FAILED")
+                echo "    Result: ${bootstrap_result}"
+            done
+
+            echo "  Waiting 10 seconds for workers to initialize..."
+            sleep 10
         else
             echo "[Phase 4/4] Checking stress-ng-cpu processes..."
         fi
@@ -481,6 +520,7 @@ check_cpu_limits() {
             echo "  Checking ${vm}..."
 
             local stress_process_count
+            local cpu_burn_details="[]"
             if [ "${guest_os}" = "windows" ]; then
                 stress_process_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
                     "${windows_guest_cpu_burn_count_cmd}" 2>/dev/null || echo "0")
@@ -491,10 +531,16 @@ check_cpu_limits() {
             stress_process_count=$(echo "${stress_process_count}" | head -1 | tr -cd '0-9')
             stress_process_count=${stress_process_count:-0}
 
+            if [ "${guest_os}" = "windows" ]; then
+                cpu_burn_details=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "${windows_guest_cpu_burn_details_cmd}" 2>/dev/null || echo "[]")
+            fi
+
             if [ "${stress_process_count}" != "${expected_cpu}" ]; then
                 if [ "${guest_os}" = "windows" ]; then
                     echo "  ✗ ${vm}: Windows CPU burn process count mismatch"
                     echo "    Expected: ${expected_cpu} (marker CNV_CPU_BURN=1 in command line), Actual: ${stress_process_count}"
+                    echo "    Matching processes: ${cpu_burn_details}"
                     log_validation_checkpoint "stress_ng_processes" "FAIL" "Expected ${expected_cpu}, got ${stress_process_count}"
                 else
                     echo "  ✗ ${vm}: stress-ng-cpu process count mismatch"
