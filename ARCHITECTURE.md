@@ -165,6 +165,10 @@ run_setup() {
 - Auto-detects available network interface via `detect-available-interface.sh`
 - Reads `nicCount` from vars file based on mode
 
+### Windows vmUser Auto-Detection
+
+After vars file processing, `run-workloads.sh` checks whether `guestOS` is `windows`. If so and `vmUser` was not explicitly overridden via environment, it auto-sets `vmUser: "Administrator"` in the processed vars file. This prevents SSH failures from a Linux default user (e.g., `fedora`) being used against a Windows guest.
+
 ### Parallel Execution
 
 When `--parallel` is used with multiple tests:
@@ -252,10 +256,10 @@ LONG_WAIT=30         # Seconds between later retries
 | `check_vm_running` | Validates VMs are running + SSH accessible | label_key, label_value, namespace, private_key, vm_user |
 | `check_vm_shutdown` | Validates VMs are stopped | label_key, label_value, namespace |
 | `check_resize` | Validates PVC resize completed | label_key, label_value, namespace, expected_size, private_key, vm_user, results_dir |
-| `check_cpu_limits` | Validates CPU cores via SSH (`nproc`) | label_key, label_value, namespace, expected_cores, private_key, vm_user, results_dir |
-| `check_memory_limits` | Validates memory via SSH (`free -m`) with 15% tolerance | label_key, label_value, namespace, expected_memory, private_key, vm_user, results_dir |
-| `check_disk_limits` | Validates disk count/size via SSH (`lsblk`) | label_key, label_value, namespace, disk_count, disk_size, private_key, vm_user, results_dir |
-| `check_disk_hotplug` | Validates hot-plugged disks attached and mounted | label_key, label_value, namespace, disk_count, pvc_size, private_key, vm_user, validate_by_size, validate_from_os, results_dir |
+| `check_cpu_limits` | Validates CPU cores via SSH (`nproc`/WMI) + workload processes | label_key, label_value, namespace, expected_cores, private_key, vm_user, results_dir, [guest_os] |
+| `check_memory_limits` | Validates memory via SSH (`free -m`/WMI) with 15% tolerance | label_key, label_value, namespace, expected_memory, private_key, vm_user, results_dir, [guest_os] |
+| `check_disk_limits` | Validates disk count/size via SSH (`lsblk`/`Get-Disk`) | label_key, label_value, namespace, disk_count, disk_size, private_key, vm_user, results_dir, [guest_os] |
+| `check_disk_hotplug` | Validates hot-plugged disks attached and mounted | label_key, label_value, namespace, disk_count, pvc_size, private_key, vm_user, validate_by_size, validate_from_os, results_dir, [guest_os] |
 | `check_nic_hotplug` | Validates NNCPs, NADs, and NIC count (5 phases) | label_key, label_value, namespace, nic_count, private_key, vm_user, validate_interfaces, results_dir |
 | `check_large_disk` | Validates large disk visibility (4 phases) | label_key, label_value, namespace, disk_size, private_key, vm_user, results_dir |
 | `check_high_memory` | Validates high memory allocation with tolerance | label_key, label_value, namespace, memory_size, private_key, vm_user, results_dir |
@@ -305,6 +309,33 @@ expected_os="${expected_os//_/ }"   # decode underscores back to spaces
 ```
 
 Apply the same encoding to any `beforeCleanup` parameter whose value may contain spaces.
+
+### Windows Guest OS Validation
+
+Several validation functions contain dual Linux/Windows code paths gated on the `guest_os` parameter (passed from the kube-burner vars `guestOS` field). When `guest_os` is `windows`, validation commands use PowerShell over `virtctl ssh` with the `Administrator` user and WMI/CIM queries instead of Linux utilities.
+
+**Per-flow Windows validation details:**
+
+| Flow | Linux Tool | Windows Tool | Notes |
+|------|-----------|-------------|-------|
+| cpu-limits Phase 2 | `nproc` | `(Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors` | Exact match |
+| cpu-limits Phase 3 | `pgrep -c stress-ng` | N/A | Skipped on Windows |
+| cpu-limits Phase 4 | N/A (stress-ng via cloud-init) | Bootstrap `CNV_CPU_BURN=1` workers via `Invoke-CimMethod Win32_Process.Create`, count via WMI `Win32_Process` | Workers are launched via SSH; no image-side helper required |
+| memory-limits Phase 2 | `free -m` | `[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB)` | 15% tolerance |
+| memory-limits Phase 3 | `pgrep -c stress-ng` | N/A | Skipped on Windows |
+| disk-limits Phase 2 | `lsblk` (count) | `(Get-Disk \| Where ...)` non-system disks | Excludes system disk by boot flag |
+| disk-limits Phase 3 | `lsblk` (sizes) | `Get-Disk` sizes in GB | 5% tolerance |
+| disk-hotplug Phase 2 | `lsblk` | `Get-Disk` | Only when `validateHotplugFromOs=true` |
+| disk-hotplug Phase 3 | `lsblk` (sizes) | `Get-Disk` sizes | 5% tolerance |
+
+**CPU burn bootstrap mechanism (cpu-limits Phase 4):**
+
+The validator dynamically builds a PowerShell script that:
+1. Queries `Win32_ComputerSystem.NumberOfLogicalProcessors` to determine core count
+2. Launches one infinite-loop worker per core using `Invoke-CimMethod -ClassName Win32_Process -MethodName Create`
+3. Each worker sets `$env:CNV_CPU_BURN=1` in its command line as a marker
+
+The script is base64-encoded as UTF-16LE and executed via `powershell.exe -EncodedCommand` to bypass SSH quoting issues. Workers are fully detached from the SSH session (WMI process creation does not depend on the parent shell).
 
 All validation functions are wrapped by `retry_validation()` which:
 1. Attempts validation up to `MAX_RETRIES` times

@@ -131,19 +131,21 @@ cnv-scenarios/
 │   │   └── config/scripts/check.sh   # Percentage-based SSH validation
 │   └── virt-capacity-benchmark/      # Comprehensive capacity testing
 │       └── config/scripts/check.sh   # Percentage-based SSH + resize validation
-├── resource-limits/                  # Resource boundary testing
+├── resource-limits/                  # Resource boundary testing (Linux + Windows)
 │   ├── cpu-limits/                   # CPU core limit testing
 │   ├── memory-limits/                # Memory limit testing
 │   └── disk-limits/                  # Disk size limit testing
-├── hot-plug/                         # Hot-plug functionality tests
+├── hot-plug/                         # Hot-plug functionality tests (disk-hotplug: Linux + Windows)
 │   ├── disk-hotplug/                 # Disk hot-plug testing
-│   └── nic-hotplug/                  # NIC hot-plug testing
+│   └── nic-hotplug/                  # NIC hot-plug testing (Linux only)
 ├── performance/                      # Performance validation tests
 │   ├── high-memory/                  # High memory allocation
 │   ├── large-disk/                   # Large disk performance
 │   └── minimal-resources/            # Minimal resource efficiency
-└── database/                         # Database workload tests
-    └── hammerdb-mssql/               # Windows MSSQL + HammerDB TPC-C benchmark
+├── database/                         # Database workload tests
+│   └── hammerdb-mssql/               # Windows MSSQL + HammerDB TPC-C benchmark
+└── docs/
+    └── windows-image-build.md        # Windows golden image build instructions
 ```
 
 > **For Contributors:** See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed documentation on how `run-workloads.sh` and validation scripts work.
@@ -178,8 +180,8 @@ counter=0 ./run-workloads.sh cpu-limits
 
 **Validations:**
 - VM spec CPU cores match expected value
-- Guest OS reports correct CPU count via `nproc`
-- stress-ng processes running (one per core)
+- Guest OS reports correct CPU count via `nproc` (Linux) or WMI `Win32_Processor` (Windows)
+- stress-ng processes running, one per core (Linux); `CNV_CPU_BURN=1` workers bootstrapped and counted via WMI (Windows)
 
 ### Memory Limits
 
@@ -206,8 +208,8 @@ memorySize=450Gi ./run-workloads.sh memory-limits
 
 **Validations:**
 - VM spec memory matches expected value
-- Guest OS reports correct memory via `free -m` (within 15% tolerance for OS overhead)
-- stress-ng processes running
+- Guest OS reports correct memory via `free -m` (Linux) or WMI `Win32_ComputerSystem` (Windows) -- within 15% tolerance for OS overhead
+- stress-ng processes running (Linux); skipped on Windows
 
 ### Disk Limits
 
@@ -235,8 +237,9 @@ diskCount=2 storageClassName=my-storage ./run-workloads.sh disk-limits
 **Validations:**
 - VM spec disk count matches expected
 - DataVolume sizes match expected
-- Guest OS shows correct disk count (excluding rootdisk, cloudinitdisk, zram)
+- Guest OS shows correct disk count (excluding rootdisk, cloudinitdisk, zram on Linux; non-system disks via `Get-Disk` on Windows)
 - Guest OS disk sizes match expected (within 5% tolerance)
+- Windows uses a separate `windowsRootDiskSize` (default 90Gi) for the CDI root disk import
 
 ## Hot-plug Testing
 
@@ -533,6 +536,31 @@ minMemory=256Mi ./run-workloads.sh minimal-resources
 
 **Note:** Uses `sshpass` for password-based SSH (no SSH keys required). Ensure `sshpass` is installed on the test runner.
 
+## Windows Guest OS Support
+
+Tests that support `guestOS: windows`: **cpu-limits**, **memory-limits**, **disk-limits**, **disk-hotplug**, and **hammerdb-mssql**.
+
+```bash
+# Run Windows cpu-limits (vmUser is auto-set to Administrator)
+guestOS='windows' \
+windowsImageUrl='http://host:port/path/image.qcow2' \
+./run-workloads.sh cpu-limits --mode sanity
+
+# Run all Windows resource-limits tests
+guestOS='windows' \
+windowsImageUrl='http://host:port/path/image.qcow2' \
+maxWaitTimeout='45m' storage='90Gi' memory='4Gi' \
+./run-workloads.sh cpu-limits memory-limits disk-limits disk-hotplug --mode sanity
+```
+
+**Key behaviours:**
+- **vmUser auto-detection**: When `guestOS=windows` is set but `vmUser` is not, the runner auto-sets `vmUser=Administrator`.
+- **CPU burn bootstrap**: `cpu-limits` Phase 4 bootstraps `CNV_CPU_BURN=1` worker processes on each Windows VM via SSH using WMI process creation (`Invoke-CimMethod Win32_Process.Create`). No image-side CPU burn helper is required.
+- **PowerShell validation**: Memory, disk, and NIC checks use PowerShell / WMI instead of Linux tools.
+- **CDI import**: Windows images are large (~12 GiB+); use `maxWaitTimeout='45m'` and `storage='90Gi'` for sanity runs.
+
+See [docs/windows-image-build.md](docs/windows-image-build.md) for image build instructions and per-flow validation details.
+
 ## Database Testing
 
 ### HammerDB / MSSQL
@@ -649,10 +677,10 @@ All validation functions are wrapped by a retry mechanism (up to 130 retries wit
 |----------|------------------|--------------|-------|
 | `check_vm_running` | VMs running, SSH accessible, node distribution | Yes (key-based) | Percentage-based validation, JSON reports |
 | `check_vm_shutdown` | VMs in Stopped state | No | JSON reports |
-| `check_cpu_limits` | CPU cores in spec + guest OS (`nproc`) + stress-ng | Yes (key-based) | Multi-phase validation |
-| `check_memory_limits` | Memory in spec + guest OS (`free -m`) + stress-ng | Yes (key-based) | 15% tolerance for OS overhead |
-| `check_disk_limits` | Disk count/size in spec + guest OS (`lsblk`) | Yes (key-based) | Multi-phase validation |
-| `check_disk_hotplug` | Hot-plugged disks in spec + guest OS + mounts | Yes (configurable) | |
+| `check_cpu_limits` | CPU cores in spec + guest OS (`nproc`/WMI) + stress-ng/CNV_CPU_BURN | Yes (key-based) | Multi-phase; Windows Phase 4 bootstraps CPU burn workers via SSH |
+| `check_memory_limits` | Memory in spec + guest OS (`free -m`/WMI) + stress-ng | Yes (key-based) | 15% tolerance; Windows uses WMI `Win32_ComputerSystem` |
+| `check_disk_limits` | Disk count/size in spec + guest OS (`lsblk`/`Get-Disk`) | Yes (key-based) | Multi-phase; Windows uses `Get-Disk` for non-system disks |
+| `check_disk_hotplug` | Hot-plugged disks in spec + guest OS + mounts | Yes (configurable) | Windows uses `Get-Disk`/`Get-Volume` |
 | `check_nic_hotplug` | NNCPs, NADs, NIC count, VM running, guest interfaces | Yes (optional) | 5-phase validation |
 | `check_resize` | Volume resize via SSH (`lsblk`) root + data volumes | Yes (key-based) | JSON reports, per-host-density/virt-capacity |
 | `check_high_memory` | High memory allocation + guest OS (`free -m`) | Yes (key-based) | 15% tolerance |
@@ -757,6 +785,8 @@ vmPassword: 'gocubsgo'                  # Set via cloud-init in VM template
 ```
 
 Note: Password-based SSH uses `sshpass` with `virtctl ssh`. Ensure `sshpass` is installed.
+
+**Windows guests**: Set `guestOS: windows` in vars. When `guestOS=windows` and `vmUser` is not explicitly overridden, `run-workloads.sh` auto-sets `vmUser=Administrator`. SSH uses `virtctl ssh` with key-based auth and `qemuGuestAgent` credential propagation. Validation commands run PowerShell over SSH.
 
 ## Sanity and Full Testing with run-workloads.sh
 
@@ -903,11 +933,12 @@ oc delete ns -l 'kube-burner.io/test-name=cnv-per-host-density'
 
 ### Common Issues
 
-1. **Storage provisioning timeouts**: Increase `maxWaitTimeout` or reduce VM count
-2. **SSH validation failures**: Check `privateKey` and `vmUser` match VM image
+1. **Storage provisioning timeouts**: Increase `maxWaitTimeout` or reduce VM count. Windows CDI imports are large; use `maxWaitTimeout='45m'` and `storage='90Gi'`.
+2. **SSH validation failures**: Check `privateKey` and `vmUser` match VM image. For Windows, `vmUser` is auto-set to `Administrator` when `guestOS=windows`.
 3. **Resource limits**: Ensure cluster has sufficient CPU/memory
 4. **Network policies**: Verify connectivity for multi-NIC tests
 5. **Image pull failures**: Check registry access and image URLs
+6. **Windows CPU burn workers not detected**: Workers are bootstrapped via SSH during validation; ensure the QEMU guest agent is running and SSH is accessible
 
 ### Variable Case Sensitivity
 
@@ -938,16 +969,16 @@ oc get vmis -n <namespace>
 
 ## Test Matrix Summary
 
-| Category | Scenario | Config File | Key Parameters |
-|----------|----------|-------------|----------------|
-| Resource Limits | CPU | cpu-limits-test.yml | `cpuCores=32` |
-| Resource Limits | Memory | memory-limits-test.yml | `memorySize=450Gi` |
-| Resource Limits | Disk | disk-limits-test.yml | `diskCount=4 diskSize=100Gi` |
-| Hot-plug | Disks | disk-hotplug-test.yml | `diskCount=256 pvcSize=1Gi` |
-| Hot-plug | NICs | nic-hotplug-test.yml | `nicCount=28` |
-| Scale | Per-Host | per-host-density.yml | `vmsPerNamespace=460 scaleMode=single-node cleanup=true` |
-| Scale | Capacity | virt-capacity-benchmark.yml | `vmCount=5 percentage_of_vms_to_validate=25` |
-| Performance | Large Disk | large-disk-performance.yml | `largeDiskSize=100Ti` |
-| Performance | High Memory | high-memory-performance.yml | `highMemory=450Gi` |
-| Performance | Minimal | minimal-resources-test.yml | `minMemory=128Mi minCpu=100m minStorage=1Gi` |
-| Database | HammerDB/MSSQL | hammerdb-mssql-test.yml | `cpuCores=8 memory=16Gi dataDisks=3 diskSize=100Gi windowsImageUrl=docker://...` |
+| Category | Scenario | Config File | Key Parameters | Windows |
+|----------|----------|-------------|----------------|---------|
+| Resource Limits | CPU | cpu-limits-test.yml | `cpuCores=32` | Yes |
+| Resource Limits | Memory | memory-limits-test.yml | `memorySize=450Gi` | Yes |
+| Resource Limits | Disk | disk-limits-test.yml | `diskCount=4 diskSize=100Gi` | Yes |
+| Hot-plug | Disks | disk-hotplug-test.yml | `diskCount=256 pvcSize=1Gi` | Yes |
+| Hot-plug | NICs | nic-hotplug-test.yml | `nicCount=28` | No |
+| Scale | Per-Host | per-host-density.yml | `vmsPerNamespace=460 scaleMode=single-node cleanup=true` | No |
+| Scale | Capacity | virt-capacity-benchmark.yml | `vmCount=5 percentage_of_vms_to_validate=25` | No |
+| Performance | Large Disk | large-disk-performance.yml | `largeDiskSize=100Ti` | No |
+| Performance | High Memory | high-memory-performance.yml | `highMemory=450Gi` | No |
+| Performance | Minimal | minimal-resources-test.yml | `minMemory=128Mi minCpu=100m minStorage=1Gi` | No |
+| Database | HammerDB/MSSQL | hammerdb-mssql-test.yml | `cpuCores=8 memory=16Gi dataDisks=3 diskSize=100Gi windowsImageUrl=docker://...` | Yes (only) |
