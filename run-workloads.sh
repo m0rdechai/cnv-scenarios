@@ -502,6 +502,15 @@ run_single_test() {
         sed -i "s#^${_key}:.*#${_key}: \"${_val}\"#" "$temp_vars"
     done < "$temp_vars"
 
+    # Auto-correct vmUser when guestOS is switched to windows but vmUser was not
+    # explicitly overridden (Linux defaults like 'fedora'/'cloud-user' won't work).
+    local _effective_guest_os
+    _effective_guest_os=$(grep "^guestOS:" "$temp_vars" 2>/dev/null | awk '{print $2}' | tr -d '"' | tr -d "'")
+    if [[ "$_effective_guest_os" == "windows" && -z "${vmUser:-}" ]]; then
+        sed -i "s#^vmUser:.*#vmUser: \"Administrator\"#" "$temp_vars"
+        logmain DEBUG "[$test_name] Auto-set vmUser=Administrator for guestOS=windows"
+    fi
+
     logmain INFO "[$test_name] Starting test"
     logmain INFO "[$test_name] Mode: $MODE"
     logmain INFO "[$test_name] Config: $config_file"
