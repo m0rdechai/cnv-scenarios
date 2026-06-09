@@ -145,7 +145,7 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_nic_hotplug {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ $nicCount }} {{ .privateKey }} {{ .vmUser }} true {{ .runTimestamp }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "../../config/scripts/wrapper.sh check_nic_hotplug {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ $nicCount }} {{ .privateKey }} {{ .vmUser }} true {{ .guestOS | default "linux" }} {{ .runTimestamp }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true
@@ -154,40 +154,77 @@ jobs:
       name: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       publicKey: {{ .publicKey }}
-  # Create VM with Simple Bridge NICs
+{{- if eq (.guestOS | default "linux") "windows" }}
+  - objectTemplate: vm-multi-nic-simple-windows.yml
+    replicas: 1
+    inputVars:
+      name: multi-nic-simple-vm
+      OS: windows
+      registryUrl: "{{ .windowsImageUrl }}"
+      cpuCores: {{ .cpuCores | default 8 }}
+      memory: {{ .memory | default "16Gi" }}
+      storage: {{ .storage | default "50Gi" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: {{ .volumeMode | default "Block" }}
+      nicCount: {{ $nicCount }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      vmUser: {{ .vmUser | default "Administrator" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      counter: {{ .counter | toString }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+  - objectTemplate: vm-multi-nic-vlan-windows.yml
+    replicas: 1
+    inputVars:
+      name: multi-nic-vlan-vm
+      OS: windows
+      registryUrl: "{{ .windowsImageUrl }}"
+      cpuCores: {{ .cpuCores | default 8 }}
+      memory: {{ .memory | default "16Gi" }}
+      storage: {{ .storage | default "50Gi" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: {{ .volumeMode | default "Block" }}
+      nicCount: {{ $nicCount }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      vmUser: {{ .vmUser | default "Administrator" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      counter: {{ .counter | toString }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- else }}
   - objectTemplate: vm-multi-nic-simple.yml
     replicas: 1
     inputVars:
       name: multi-nic-simple-vm
-      OS: rhel9
-      cpuCores: 8
-      memory: 16Gi
-      storage: 50Gi
+      OS: {{ .osType | default "rhel9" }}
+      cpuCores: {{ .cpuCores | default 8 }}
+      memory: {{ .memory | default "16Gi" }}
+      storage: {{ .storage | default "50Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
-      volumemode: Block
+      volumemode: {{ .volumeMode | default "Block" }}
       nicCount: {{ $nicCount }}
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
-  # Create VM with VLAN Bridge NICs
   - objectTemplate: vm-multi-nic-vlan.yml
     replicas: 1
     inputVars:
-        name: multi-nic-vlan-vm
-        OS: rhel9
-        cpuCores: 8
-        memory: 16Gi
-        storage: 50Gi
-        storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
-        volumemode: Block
-        nicCount: {{ $nicCount }}
-        nodeSelector: {{ .nodeSelector | default "" }}
-        sshPublicKeySecret: {{ $sshPublicKeySecretName }}
-        counter: {{ .counter | toString }}
-        vmLabels:
-          {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+      name: multi-nic-vlan-vm
+      OS: {{ .osType | default "rhel9" }}
+      cpuCores: {{ .cpuCores | default 8 }}
+      memory: {{ .memory | default "16Gi" }}
+      storage: {{ .storage | default "50Gi" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: {{ .volumeMode | default "Block" }}
+      nicCount: {{ $nicCount }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      counter: {{ .counter | toString }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- end }}
 
 # Cleanup NNCP resources if flag is set
 {{ if .cleanupNncp | default false }}

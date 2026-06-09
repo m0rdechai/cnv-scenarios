@@ -73,6 +73,7 @@ function check_vm_running() {
     local percentage_to_validate="${6:-25}"
     local max_ssh_retries="${7:-8}"
     local results_dir="${8:-/tmp/kube-burner-validations}"
+    local guest_os="${9:-linux}"
     
     # Set up logging
     mkdir -p "${results_dir}"
@@ -90,6 +91,7 @@ function check_vm_running() {
     echo "Namespace:         ${namespace}"
     echo "Label:             ${label_key}=${label_value}"
     echo "SSH User:          ${vm_user:-not provided}"
+    echo "Guest OS:          ${guest_os}"
     echo "SSH Validation:    ${percentage_to_validate}%"
     echo "SSH Max Retries:   ${max_ssh_retries} (15s interval)"
     echo "Results Dir:       ${results_dir}"
@@ -204,6 +206,11 @@ function check_vm_running() {
                 local last_error=""
                 
                 while [ ${retry_count} -lt ${max_ssh_retries} ] && [ "${ssh_success}" = "false" ]; do
+                local ssh_cmd="hostname && echo SSH_OK"
+                if [ "${guest_os}" = "windows" ]; then
+                    ssh_cmd='$env:COMPUTERNAME; echo SSH_OK'
+                fi
+
                 local ssh_test
                 ssh_test=$(virtctl ssh \
                     --local-ssh-opts="-o StrictHostKeyChecking=no" \
@@ -213,7 +220,7 @@ function check_vm_running() {
                     --local-ssh-opts="-o PasswordAuthentication=no" \
                     --local-ssh-opts="-o PreferredAuthentications=publickey" \
                     -n "${vm_ns}" -i "${private_key}" \
-                    --command "hostname && echo SSH_OK" \
+                    --command "${ssh_cmd}" \
                     "${vm_user}@vmi/${vm}" 2>&1 || echo "SSH_FAILED")
                     
                     if echo "${ssh_test}" | grep -q "SSH_OK"; then

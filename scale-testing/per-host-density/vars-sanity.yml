@@ -75,3 +75,7 @@ PROM_TOKEN: ""
 
 # VM Image Configuration
 imageUrl: "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud/generic_alpine-3.22.0-x86_64-bios-cloudinit-r0.qcow2"
+
+# Guest OS Configuration (Linux or Windows)
+guestOS: "linux"
+# windowsImageUrl: ""

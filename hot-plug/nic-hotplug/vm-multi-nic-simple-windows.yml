@@ -1,0 +1,121 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  labels:
+    kubevirt-vm: vm-{{.name}}-{{.Replica}}
+    test-type: nic-hotplug-simple
+{{- range $key, $value := .vmLabels }}
+    {{ $key }}: {{ $value }}
+{{- end }}
+  name: {{.name}}-{{.Replica}}
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt-vm: vm-{{.name}}-{{.Replica}}
+        kubevirt.io/os: windows
+        test-type: nic-hotplug-simple
+{{- range $key, $value := .vmLabels }}
+        {{ $key }}: {{ $value }}
+{{- end }}
+    spec:
+      accessCredentials:
+      - sshPublicKey:
+          propagationMethod:
+            qemuGuestAgent:
+              users:
+                - "{{ .vmUser }}"
+          source:
+            secret:
+              secretName: "{{ .sshPublicKeySecret }}-{{ .counter }}"
+      {{- if .nodeSelector }}
+      nodeSelector:
+        {{.nodeSelector}}
+      {{- end }}
+      domain:
+        clock:
+          timer:
+            hpet:
+              present: false
+            hyperv: {}
+            pit:
+              tickPolicy: delay
+            rtc:
+              tickPolicy: catchup
+        cpu:
+          cores: {{.cpuCores}}
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          interfaces:
+          - masquerade: {}
+            model: virtio
+            name: default
+          {{- range $i := until (.nicCount | int) }}
+          - bridge: {}
+            model: virtio
+            name: test-network-simple-{{$i}}
+          {{- end }}
+          networkInterfaceMultiqueue: true
+          rng: {}
+          tpm: {}
+        features:
+          acpi: {}
+          apic: {}
+          smm:
+            enabled: true
+          hyperv:
+            frequencies: {}
+            ipi: {}
+            reenlightenment: {}
+            relaxed: {}
+            reset: {}
+            spinlocks:
+              spinlocks: 8191
+            synic: {}
+            tlbflush: {}
+            vapic: {}
+            vpindex: {}
+        firmware:
+          bootloader:
+            efi: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            memory: {{.memory}}
+      networks:
+      - name: default
+        pod: {}
+      {{- range $i := until (.nicCount | int) }}
+      - name: test-network-simple-{{$i}}
+        multus:
+          networkName: test-network-simple-{{add $i 1}}
+      {{- end }}
+      volumes:
+      - dataVolume:
+          name: dvclone-simple-{{.Replica}}
+        name: rootdisk
+  dataVolumeTemplates:
+  - metadata:
+      name: dvclone-simple-{{.Replica}}
+    spec:
+      source:
+{{- if hasPrefix .registryUrl "docker://" }}
+        registry:
+          url: {{ .registryUrl }}
+{{- else }}
+        http:
+          url: {{ .registryUrl }}
+{{- end }}
+      storage:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{.storage}}
+        storageClassName: {{.storageclass}}
+        volumeMode: {{.volumemode}}

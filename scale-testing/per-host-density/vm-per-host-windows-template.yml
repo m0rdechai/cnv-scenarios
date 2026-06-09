@@ -1,0 +1,148 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  labels:
+    kubevirt-vm: vm-{{.name}}-{{.counter}}-{{.Replica}}
+    test-type: per-host-density
+    scale-mode: "{{ .scaleMode }}"
+    {{- if .targetNode }}
+    target-node: "{{ .targetNode }}"
+    {{- end }}
+  {{range $key, $value := .vmLabels }}
+    {{ $key }}: {{ $value }}
+  {{end}}
+  name: "{{.name}}-{{.counter}}-{{.Replica}}"
+spec:
+  runStrategy: {{ if .VMIrunning }}Always{{ else }}Halted{{ end }}
+  template:
+    metadata:
+      labels:
+        kubevirt-vm: vm-{{.name}}-{{.counter}}-{{.Replica}}
+        kubevirt.io/os: windows
+        test-type: per-host-density
+        scale-mode: "{{ .scaleMode }}"
+        {{- if .targetNode }}
+        target-node: "{{ .targetNode }}"
+        {{- end }}
+      {{range $key, $value := .vmLabels }}
+        {{ $key }}: {{ $value }}
+      {{end}}
+    spec:
+      {{- if eq .scaleMode "single-node" }}
+      {{- if .targetNode }}
+      nodeSelector:
+        {{ .nodeSelectorLabel }}: {{ .targetNode }}
+      {{- end }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: test-type
+                operator: In
+                values:
+                - per-host-density
+            topologyKey: kubernetes.io/hostname
+      {{- else }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: test-type
+                  operator: In
+                  values:
+                  - per-host-density
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      accessCredentials:
+      - sshPublicKey:
+          propagationMethod:
+            qemuGuestAgent:
+              users:
+                - "{{ .vmUser }}"
+          source:
+            secret:
+              secretName: "{{ .sshPublicKeySecret }}"
+      domain:
+        clock:
+          timer:
+            hpet:
+              present: false
+            hyperv: {}
+            pit:
+              tickPolicy: delay
+            rtc:
+              tickPolicy: catchup
+        cpu:
+          cores: 1
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: rootdisk
+          interfaces:
+          - masquerade: {}
+            model: virtio
+            name: default
+          networkInterfaceMultiqueue: false
+          rng: {}
+          tpm: {}
+        features:
+          acpi: {}
+          apic: {}
+          smm:
+            enabled: true
+          hyperv:
+            frequencies: {}
+            ipi: {}
+            reenlightenment: {}
+            relaxed: {}
+            reset: {}
+            spinlocks:
+              spinlocks: 8191
+            synic: {}
+            tlbflush: {}
+            vapic: {}
+            vpindex: {}
+        firmware:
+          bootloader:
+            efi: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            memory: {{.memory}}
+            cpu: {{.cpuRequest}}
+          limits:
+            memory: {{.memory}}
+            cpu: {{.cpuLimit}}
+      networks:
+      - name: default
+        pod: {}
+      volumes:
+      - dataVolume:
+          name: dvclone-{{.counter}}-{{.Replica}}
+        name: rootdisk
+  dataVolumeTemplates:
+  - metadata:
+      name: dvclone-{{.counter}}-{{.Replica}}
+    spec:
+      source:
+{{- if hasPrefix .registryUrl "docker://" }}
+        registry:
+          url: {{ .registryUrl }}
+{{- else }}
+        http:
+          url: {{ .registryUrl }}
+{{- end }}
+      storage:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{.storage}}
+        storageClassName: {{.storageclass}}
+        volumeMode: {{.volumemode}}

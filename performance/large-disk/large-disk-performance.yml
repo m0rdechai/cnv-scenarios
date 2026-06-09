@@ -61,7 +61,7 @@ jobs:
   jobPause: {{ .jobPause | default "15m" }}
   cleanup: false
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_large_disk {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .largeDiskSize | default "100Ti" }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "../../config/scripts/wrapper.sh check_large_disk {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .largeDiskSize | default "100Ti" }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true
@@ -70,6 +70,30 @@ jobs:
       name: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       publicKey: {{ .publicKey }}
+{{- if eq (.guestOS | default "linux") "windows" }}
+  - objectTemplate: vm-large-disk-windows.yml
+    replicas: {{ $vmCount }}
+    waitOptions:
+      labelSelector:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+    inputVars:
+      name: {{ $vmName }}
+      counter: {{ .counter | toString }}
+      OS: windows
+      registryUrl: "{{ .windowsImageUrl }}"
+      cpuCores: {{ .cpuCores | default 16 }}
+      memory: {{ .memory | default "32Gi" }}
+      rootStorage: {{ .windowsRootDiskSize | default "90Gi" }}
+      dataStorage: {{ .largeDiskSize | default "100Ti" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: Block
+      VMIrunning: {{ .vmRunning | default true }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      vmUser: {{ .vmUser | default "Administrator" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- else }}
   - objectTemplate: templates/cloudinit-userdata-secret.yml
     runOnce: true
     replicas: 1
@@ -90,7 +114,6 @@ jobs:
       cpuCores: {{ .cpuCores | default 16 }}
       memory: {{ .memory | default "32Gi" }}
       rootStorage: {{ .rootStorage | default "50Gi" }}
-      # Large disk size - default 100Ti as per CSV scenario
       dataStorage: {{ .largeDiskSize | default "100Ti" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: Block
@@ -101,3 +124,4 @@ jobs:
       baseImage: {{ .baseImage | default "quay.io/containerdisks/fedora:41" }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- end }}

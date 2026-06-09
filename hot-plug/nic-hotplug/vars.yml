@@ -35,9 +35,17 @@ cleanupNncp: true                          # Set to false to preserve NNCPs for 
 cpuCores: 8                                # CPU cores allocated to each VM
 memory: "16Gi"                             # Memory allocation per VM
 
+# VM OS Configuration
+osType: "rhel9"                            # OS type label for VM template
+
+# Guest OS Configuration (Linux or Windows)
+guestOS: "linux"                           # Set to "windows" for Windows VM testing
+# windowsImageUrl: "docker://your-registry/windows-image:latest"  # Windows image URL (docker:// or http(s)://)
+
 # Storage Configuration
 storage: "50Gi"                            # Storage size for VM disk
 storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisioning
+volumeMode: "Block"                        # PVC volume mode
 
 # Test Execution Control
 counter: 1                                 # Test iteration counter (0 triggers cleanup)

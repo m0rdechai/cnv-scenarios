@@ -2057,15 +2057,16 @@ check_nic_hotplug() {
     local private_key="${5:-}"
     local vm_user="${6:-}"
     local validate_guest_os="${7:-true}"
-    local arg8="${8:-}"
+    local guest_os="${8:-linux}"
     local arg9="${9:-}"
+    local arg10="${10:-}"
     local results_dir
     local nncp_run_id=""
-    if [[ -n "${arg9}" ]]; then
-        nncp_run_id="${arg8}"
-        results_dir="${arg9}"
+    if [[ -n "${arg10}" ]]; then
+        nncp_run_id="${arg9}"
+        results_dir="${arg10}"
     else
-        results_dir="${arg8:-/tmp/kube-burner-validations}"
+        results_dir="${arg9:-/tmp/kube-burner-validations}"
     fi
 
     local nncp_simple_lbl="test-type=nic-hotplug-simple"
@@ -2081,6 +2082,7 @@ check_nic_hotplug() {
     echo "Namespace: ${namespace}"
     echo "Expected NICs: ${expected_nic_count}"
     echo "Validate Guest OS: ${validate_guest_os}"
+    echo "Guest OS: ${guest_os}"
     if [[ -n "${nncp_run_id}" ]]; then
         echo "NNCP run scope: cnv-scenarios.io/run=${nncp_run_id}"
     fi
@@ -2285,47 +2287,100 @@ VALIDATIONS
 
         echo "    ✓ virtctl SSH connection successful"
 
-        # Count network interfaces in guest (excluding lo)
-        echo "    Checking network interfaces in guest OS..."
-        local guest_interface_count
-        guest_interface_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-            "ip -br link show | grep -E '^(eth|ens|enp)' | wc -l" 2>/dev/null || echo "0")
-        guest_interface_count=$(echo "${guest_interface_count}" | head -1 | tr -cd '0-9')
-        guest_interface_count=${guest_interface_count:-0}
+        if [ "${guest_os}" = "windows" ]; then
+            # Windows: check for virtio-net driver presence first
+            echo "    Checking for VirtIO network drivers..."
+            local virtio_count
+            virtio_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                '(Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*VirtIO*"} | Measure-Object).Count' 2>/dev/null || echo "0")
+            virtio_count=$(echo "${virtio_count}" | head -1 | tr -cd '0-9')
+            virtio_count=${virtio_count:-0}
 
-        if [ "${guest_interface_count}" -eq 0 ]; then
-            echo "    ERROR: Failed to retrieve interface list from VM ${vm}"
-            return 1
-        fi
+            if [ "${virtio_count}" -eq 0 ]; then
+                echo "    ERROR: No virtio-net adapters found on ${vm}"
+                echo "    Windows image must include Red Hat VirtIO network drivers"
+                return 1
+            fi
+            echo "    ✓ Found ${virtio_count} VirtIO network adapter(s)"
 
-        # Expected: 1 default + hot-plugged NICs
-        local expected_guest_interfaces=$((expected_nic_count + 1))
+            # Count active network interfaces
+            echo "    Checking network interfaces in guest OS..."
+            local guest_interface_count
+            guest_interface_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                '(Get-NetAdapter | Where-Object {$_.Status -eq "Up"}).Count' 2>/dev/null || echo "0")
+            guest_interface_count=$(echo "${guest_interface_count}" | head -1 | tr -cd '0-9')
+            guest_interface_count=${guest_interface_count:-0}
 
-        if [ "${guest_interface_count}" -ne "${expected_guest_interfaces}" ]; then
-            echo "    ERROR: Guest OS interface count mismatch for VM ${vm}"
-            echo "    Expected: ${expected_guest_interfaces}, Actual: ${guest_interface_count}"
+            if [ "${guest_interface_count}" -eq 0 ]; then
+                echo "    ERROR: Failed to retrieve interface list from VM ${vm}"
+                return 1
+            fi
 
-            # Show interface details for debugging
-            echo "    Guest interfaces:"
-            remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                "ip -br link show" 2>/dev/null || echo "    Could not retrieve interface list"
-            return 1
-        fi
+            local expected_guest_interfaces=$((expected_nic_count + 1))
 
-        echo "    ✓ Guest OS has ${guest_interface_count} interfaces"
+            if [ "${guest_interface_count}" -ne "${expected_guest_interfaces}" ]; then
+                echo "    ERROR: Guest OS interface count mismatch for VM ${vm}"
+                echo "    Expected: ${expected_guest_interfaces}, Actual: ${guest_interface_count}"
+                echo "    Guest adapters:"
+                remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    'Get-NetAdapter | Format-Table Name, InterfaceDescription, Status -AutoSize' 2>/dev/null || echo "    Could not retrieve adapter list"
+                return 1
+            fi
 
-        # Check if IPs are configured (optional - may take time for DHCP/static config)
-        local configured_ips
-        configured_ips=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-            "ip -br addr show | grep -E '192\.168\.' | wc -l" 2>/dev/null || echo "0")
-        configured_ips=$(echo "${configured_ips}" | head -1 | tr -cd '0-9')
-        configured_ips=${configured_ips:-0}
+            echo "    ✓ Guest OS has ${guest_interface_count} active interfaces"
 
-        echo "    Interfaces with test IPs configured: ${configured_ips}/${expected_nic_count}"
+            # Check for test IPs (informational)
+            local configured_ips
+            configured_ips=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                '(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like "192.168.*"}).Count' 2>/dev/null || echo "0")
+            configured_ips=$(echo "${configured_ips}" | head -1 | tr -cd '0-9')
+            configured_ips=${configured_ips:-0}
 
-        if [ "${configured_ips}" -lt "${expected_nic_count}" ]; then
-            echo "    ⚠ WARNING: Not all test interfaces have IPs configured yet"
-            echo "    This may be expected if using DHCP or manual configuration"
+            echo "    Interfaces with test IPs configured: ${configured_ips}/${expected_nic_count}"
+
+            if [ "${configured_ips}" -lt "${expected_nic_count}" ]; then
+                echo "    ⚠ WARNING: Not all test interfaces have IPs configured yet"
+            fi
+        else
+            # Linux: count network interfaces
+            echo "    Checking network interfaces in guest OS..."
+            local guest_interface_count
+            guest_interface_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                "ip -br link show | grep -E '^(eth|ens|enp)' | wc -l" 2>/dev/null || echo "0")
+            guest_interface_count=$(echo "${guest_interface_count}" | head -1 | tr -cd '0-9')
+            guest_interface_count=${guest_interface_count:-0}
+
+            if [ "${guest_interface_count}" -eq 0 ]; then
+                echo "    ERROR: Failed to retrieve interface list from VM ${vm}"
+                return 1
+            fi
+
+            local expected_guest_interfaces=$((expected_nic_count + 1))
+
+            if [ "${guest_interface_count}" -ne "${expected_guest_interfaces}" ]; then
+                echo "    ERROR: Guest OS interface count mismatch for VM ${vm}"
+                echo "    Expected: ${expected_guest_interfaces}, Actual: ${guest_interface_count}"
+                echo "    Guest interfaces:"
+                remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "ip -br link show" 2>/dev/null || echo "    Could not retrieve interface list"
+                return 1
+            fi
+
+            echo "    ✓ Guest OS has ${guest_interface_count} interfaces"
+
+            # Check if IPs are configured (informational)
+            local configured_ips
+            configured_ips=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                "ip -br addr show | grep -E '192\.168\.' | wc -l" 2>/dev/null || echo "0")
+            configured_ips=$(echo "${configured_ips}" | head -1 | tr -cd '0-9')
+            configured_ips=${configured_ips:-0}
+
+            echo "    Interfaces with test IPs configured: ${configured_ips}/${expected_nic_count}"
+
+            if [ "${configured_ips}" -lt "${expected_nic_count}" ]; then
+                echo "    ⚠ WARNING: Not all test interfaces have IPs configured yet"
+                echo "    This may be expected if using DHCP or manual configuration"
+            fi
         fi
     done
 
@@ -2601,6 +2656,7 @@ check_high_memory() {
     local private_key="$5"
     local vm_user="$6"
     local results_dir="${7:-/tmp/kube-burner-validations}"
+    local guest_os="${8:-linux}"
 
     local start_time=$SECONDS
     local validation_status="SUCCESS"
@@ -2614,6 +2670,7 @@ check_high_memory() {
     echo "Label: ${label_key}=${label_value}"
     echo "Expected Memory: ${expected_memory}"
     echo "SSH User: ${vm_user}"
+    echo "Guest OS: ${guest_os}"
     echo "Results: ${results_dir}"
     echo "----------------------------------------------"
 
@@ -2642,18 +2699,23 @@ check_high_memory() {
     # Phase 2: Check VM responsiveness
     if [ "${validation_status}" = "SUCCESS" ]; then
         echo ""
-        echo "[Phase 2/3] Checking VM responsiveness (SSH + uptime)..."
+        echo "[Phase 2/3] Checking VM responsiveness (SSH)..."
         phase_start=$SECONDS
         local uptime_passed=0
         local uptime_failed=0
 
+        local ssh_check_cmd="uptime"
+        if [ "${guest_os}" = "windows" ]; then
+            ssh_check_cmd="echo SSH_OK"
+        fi
+
         for vm in ${vms}; do
             echo "  Checking ${vm}..."
             local uptime_output
-            uptime_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "uptime" 2>&1)
+            uptime_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${ssh_check_cmd}" 2>&1)
             local ret=$?
             if [ $ret -ne 0 ]; then
-                echo "  ✗ ${vm}: SSH/uptime check failed"
+                echo "  ✗ ${vm}: SSH check failed"
                 uptime_failed=$((uptime_failed + 1))
             else
                 echo "  ✓ ${vm}: responsive"
@@ -2709,9 +2771,14 @@ check_high_memory() {
             echo "  Expected: ${expected_memory_mb}MB (${expected_memory})"
             echo "  Tolerance: ±15% (${min_memory}-${max_memory}MB)"
 
+            local mem_cmd="free -m | awk 'NR==2{print \$2}'"
+            if [ "${guest_os}" = "windows" ]; then
+                mem_cmd='[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB)'
+            fi
+
             for vm in ${vms}; do
                 echo "  Checking ${vm}..."
-                guest_memory_mb=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "free -m | awk 'NR==2{print \$2}'" 2>/dev/null || echo "0")
+                guest_memory_mb=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${mem_cmd}" 2>/dev/null || echo "0")
                 guest_memory_mb=$(echo "${guest_memory_mb}" | head -1 | tr -cd '0-9')
                 guest_memory_mb=${guest_memory_mb:-0}
 
@@ -2808,6 +2875,7 @@ check_large_disk() {
     local private_key="$5"
     local vm_user="$6"
     local results_dir="${7:-/tmp/kube-burner-validations}"
+    local guest_os="${8:-linux}"
 
     local start_time=$SECONDS
     local validation_status="SUCCESS"
@@ -2821,6 +2889,7 @@ check_large_disk() {
     echo "Label: ${label_key}=${label_value}"
     echo "Expected Disk Size: ${expected_disk_size}"
     echo "SSH User: ${vm_user}"
+    echo "Guest OS: ${guest_os}"
     echo "Results: ${results_dir}"
     echo "----------------------------------------------"
 
@@ -2849,18 +2918,23 @@ check_large_disk() {
     # Phase 2: Check VM responsiveness
     if [ "${validation_status}" = "SUCCESS" ]; then
         echo ""
-        echo "[Phase 2/4] Checking VM responsiveness (SSH + uptime)..."
+        echo "[Phase 2/4] Checking VM responsiveness (SSH)..."
         phase_start=$SECONDS
         local uptime_passed=0
         local uptime_failed=0
 
+        local ssh_check_cmd="uptime"
+        if [ "${guest_os}" = "windows" ]; then
+            ssh_check_cmd="echo SSH_OK"
+        fi
+
         for vm in ${vms}; do
             echo "  Checking ${vm}..."
             local uptime_output
-            uptime_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "uptime" 2>&1)
+            uptime_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${ssh_check_cmd}" 2>&1)
             local ret=$?
             if [ $ret -ne 0 ]; then
-                echo "  ✗ ${vm}: SSH/uptime check failed"
+                echo "  ✗ ${vm}: SSH check failed"
                 uptime_failed=$((uptime_failed + 1))
             else
                 echo "  ✓ ${vm}: responsive"
@@ -2894,34 +2968,47 @@ check_large_disk() {
 
         for vm in ${vms}; do
             echo "  Checking ${vm}..."
-            # Get block devices via lsblk, looking for secondary disks (vdb, vdc, sdb, sdc, etc.)
-            local blk_devices
-            blk_devices=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "lsblk --json 2>/dev/null || lsblk -b -o NAME,SIZE,TYPE 2>/dev/null" 2>&1)
-            local ret=$?
 
-            if [ $ret -ne 0 ]; then
-                echo "  ✗ ${vm}: Failed to get block devices"
-                disk_visible_failed=$((disk_visible_failed + 1))
-                continue
-            fi
+            if [ "${guest_os}" = "windows" ]; then
+                local win_disk_count
+                win_disk_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    '(Get-Disk | Where-Object {-not $_.IsBoot -and -not $_.IsSystem}).Count' 2>/dev/null || echo "0")
+                win_disk_count=$(echo "${win_disk_count}" | head -1 | tr -cd '0-9')
+                win_disk_count=${win_disk_count:-0}
 
-            # Look for large disk (excluding vda/sda root disk and zram)
-            # Try JSON format first
-            if echo "${blk_devices}" | grep -q "blockdevices"; then
-                disk_device=$(echo "${blk_devices}" | jq -r '.blockdevices[] | select(.type == "disk" and .name != "vda" and .name != "sda" and (.name | startswith("zram") | not)) | .name' 2>/dev/null | head -1)
-                disk_size_guest=$(echo "${blk_devices}" | jq -r '.blockdevices[] | select(.type == "disk" and .name != "vda" and .name != "sda" and (.name | startswith("zram") | not)) | .size' 2>/dev/null | head -1)
+                if [ "${win_disk_count}" -eq 0 ]; then
+                    echo "  ✗ ${vm}: No large disk found (only system disk visible)"
+                    disk_visible_failed=$((disk_visible_failed + 1))
+                else
+                    echo "  ✓ ${vm}: Found ${win_disk_count} non-system disk(s)"
+                    disk_visible_passed=$((disk_visible_passed + 1))
+                fi
             else
-                # Fallback to text parsing
-                disk_device=$(echo "${blk_devices}" | awk '$3=="disk" && $1!="vda" && $1!="sda" && $1!~/^zram/ {print $1}' | head -1)
-                disk_size_guest=$(echo "${blk_devices}" | awk '$3=="disk" && $1!="vda" && $1!="sda" && $1!~/^zram/ {print $2}' | head -1)
-            fi
+                local blk_devices
+                blk_devices=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "lsblk --json 2>/dev/null || lsblk -b -o NAME,SIZE,TYPE 2>/dev/null" 2>&1)
+                local ret=$?
 
-            if [ -z "${disk_device}" ]; then
-                echo "  ✗ ${vm}: No large disk found (only root disk visible)"
-                disk_visible_failed=$((disk_visible_failed + 1))
-            else
-                echo "  ✓ ${vm}: Large disk found: /dev/${disk_device} (${disk_size_guest})"
-                disk_visible_passed=$((disk_visible_passed + 1))
+                if [ $ret -ne 0 ]; then
+                    echo "  ✗ ${vm}: Failed to get block devices"
+                    disk_visible_failed=$((disk_visible_failed + 1))
+                    continue
+                fi
+
+                if echo "${blk_devices}" | grep -q "blockdevices"; then
+                    disk_device=$(echo "${blk_devices}" | jq -r '.blockdevices[] | select(.type == "disk" and .name != "vda" and .name != "sda" and (.name | startswith("zram") | not)) | .name' 2>/dev/null | head -1)
+                    disk_size_guest=$(echo "${blk_devices}" | jq -r '.blockdevices[] | select(.type == "disk" and .name != "vda" and .name != "sda" and (.name | startswith("zram") | not)) | .size' 2>/dev/null | head -1)
+                else
+                    disk_device=$(echo "${blk_devices}" | awk '$3=="disk" && $1!="vda" && $1!="sda" && $1!~/^zram/ {print $1}' | head -1)
+                    disk_size_guest=$(echo "${blk_devices}" | awk '$3=="disk" && $1!="vda" && $1!="sda" && $1!~/^zram/ {print $2}' | head -1)
+                fi
+
+                if [ -z "${disk_device}" ]; then
+                    echo "  ✗ ${vm}: No large disk found (only root disk visible)"
+                    disk_visible_failed=$((disk_visible_failed + 1))
+                else
+                    echo "  ✓ ${vm}: Large disk found: /dev/${disk_device} (${disk_size_guest})"
+                    disk_visible_passed=$((disk_visible_passed + 1))
+                fi
             fi
         done
 
@@ -2975,33 +3062,54 @@ check_large_disk() {
 
             for vm in ${vms}; do
                 echo "  Checking ${vm}..."
-                # Get disk size in bytes and convert to GB
-                local disk_size_bytes
-                disk_size_bytes=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "lsblk -b -d -o SIZE /dev/${disk_device} 2>/dev/null | tail -1" 2>&1)
-                disk_size_bytes=$(echo "${disk_size_bytes}" | tr -cd '0-9')
 
-                if [ -z "${disk_size_bytes}" ] || [ "${disk_size_bytes}" -eq 0 ]; then
-                    # Try alternative method
-                    disk_size_bytes=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "cat /sys/block/${disk_device}/size 2>/dev/null" 2>&1)
-                    disk_size_bytes=$(echo "${disk_size_bytes}" | tr -cd '0-9')
-                    # /sys/block/*/size is in 512-byte sectors
-                    if [ -n "${disk_size_bytes}" ]; then
-                        disk_size_bytes=$((disk_size_bytes * 512))
-                    fi
-                fi
+                if [ "${guest_os}" = "windows" ]; then
+                    local disk_size_bytes
+                    disk_size_bytes=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                        '(Get-Disk | Where-Object {-not $_.IsBoot -and -not $_.IsSystem} | Select-Object -First 1).Size' 2>/dev/null || echo "0")
+                    disk_size_bytes=$(echo "${disk_size_bytes}" | head -1 | tr -cd '0-9')
+                    disk_size_bytes=${disk_size_bytes:-0}
 
-                if [ -z "${disk_size_bytes}" ] || [ "${disk_size_bytes}" -eq 0 ]; then
-                    echo "  ✗ ${vm}: Failed to get disk size"
-                    size_failed=$((size_failed + 1))
-                else
-                    local disk_size_gb=$((disk_size_bytes / 1024 / 1024 / 1024))
-
-                    if [ "${disk_size_gb}" -lt "${min_size}" ] || [ "${disk_size_gb}" -gt "${max_size}" ]; then
-                        echo "  ✗ ${vm}: Disk size ${disk_size_gb}GB outside expected range"
+                    if [ "${disk_size_bytes}" -eq 0 ]; then
+                        echo "  ✗ ${vm}: Failed to get disk size"
                         size_failed=$((size_failed + 1))
                     else
-                        echo "  ✓ ${vm}: Disk size ${disk_size_gb}GB (within expected range)"
-                        size_passed=$((size_passed + 1))
+                        local disk_size_gb=$((disk_size_bytes / 1024 / 1024 / 1024))
+
+                        if [ "${disk_size_gb}" -lt "${min_size}" ] || [ "${disk_size_gb}" -gt "${max_size}" ]; then
+                            echo "  ✗ ${vm}: Disk size ${disk_size_gb}GB outside expected range"
+                            size_failed=$((size_failed + 1))
+                        else
+                            echo "  ✓ ${vm}: Disk size ${disk_size_gb}GB (within expected range)"
+                            size_passed=$((size_passed + 1))
+                        fi
+                    fi
+                else
+                    local disk_size_bytes
+                    disk_size_bytes=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "lsblk -b -d -o SIZE /dev/${disk_device} 2>/dev/null | tail -1" 2>&1)
+                    disk_size_bytes=$(echo "${disk_size_bytes}" | tr -cd '0-9')
+
+                    if [ -z "${disk_size_bytes}" ] || [ "${disk_size_bytes}" -eq 0 ]; then
+                        disk_size_bytes=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "cat /sys/block/${disk_device}/size 2>/dev/null" 2>&1)
+                        disk_size_bytes=$(echo "${disk_size_bytes}" | tr -cd '0-9')
+                        if [ -n "${disk_size_bytes}" ]; then
+                            disk_size_bytes=$((disk_size_bytes * 512))
+                        fi
+                    fi
+
+                    if [ -z "${disk_size_bytes}" ] || [ "${disk_size_bytes}" -eq 0 ]; then
+                        echo "  ✗ ${vm}: Failed to get disk size"
+                        size_failed=$((size_failed + 1))
+                    else
+                        local disk_size_gb=$((disk_size_bytes / 1024 / 1024 / 1024))
+
+                        if [ "${disk_size_gb}" -lt "${min_size}" ] || [ "${disk_size_gb}" -gt "${max_size}" ]; then
+                            echo "  ✗ ${vm}: Disk size ${disk_size_gb}GB outside expected range"
+                            size_failed=$((size_failed + 1))
+                        else
+                            echo "  ✓ ${vm}: Disk size ${disk_size_gb}GB (within expected range)"
+                            size_passed=$((size_passed + 1))
+                        fi
                     fi
                 fi
             done

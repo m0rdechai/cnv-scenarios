@@ -54,6 +54,7 @@ jobs:
       {{ $testNamespacesLabelKey }}: {{ $testName }}
 {{ end }}
 
+{{- if ne (.guestOS | default "linux") "windows" }}
 # Create source DataVolume first (one per namespace).
 # customStatusPaths: kube-burner evaluates `key` as jq against the object's .status
 # (not the full resource). For CDI DataVolume, wait until .phase is Succeeded.
@@ -83,6 +84,7 @@ jobs:
       storageclass: {{ .storageClassName }}
       volumemode: Block
       imageUrl: {{ .imageUrl }}
+{{- end }}
 
 # Create VMs - supports single-node or multi-node distribution
 - name: create-vms
@@ -106,16 +108,40 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
   objects:
-  # SSH secret in the same job as VMs (see cpu-limits-test.yml). A separate
-  # create-only job can leave the secret missing before VM start under kube-burner v2.
   - objectTemplate: templates/ssh-secret.yml
     runOnce: true
     replicas: 1
     inputVars:
       name: {{ $testName }}-ssh
       publicKey: {{ .publicKey }}
+{{- if eq (.guestOS | default "linux") "windows" }}
+  - objectTemplate: vm-per-host-windows-template.yml
+    replicas: {{ $vmsPerNamespace }}
+    waitOptions:
+      labelSelector:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+    inputVars:
+      name: {{ $vmName }}
+      counter: {{ .counter | toString }}
+      sshPublicKeySecret: {{ $testName }}-ssh
+      OS: windows
+      registryUrl: "{{ .windowsImageUrl }}"
+      vmUser: {{ .vmUser | default "Administrator" }}
+      cpuRequest: {{ .vmCpuRequest }}
+      cpuLimit: {{ .vmCpuLimit }}
+      memory: {{ .vmMemory }}
+      storage: {{ $vmStorageSizeStr }}
+      storageclass: {{ .storageClassName }}
+      volumemode: Block
+      VMIrunning: true
+      scaleMode: {{ $scaleMode }}
+      targetNode: {{ $targetNode }}
+      nodeSelectorLabel: {{ .nodeSelectorLabel }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- else }}
   - objectTemplate: vm-per-host-template.yml
     replicas: {{ $vmsPerNamespace }}
     waitOptions:
@@ -138,6 +164,7 @@ jobs:
       nodeSelectorLabel: {{ .nodeSelectorLabel }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- end }}
 
 {{ if not .skipVmShutdown }}
 # Shutdown VMs (all namespaces at once via label selector)
@@ -186,7 +213,7 @@ jobs:
   maxWaitTimeout: {{ .maxWaitTimeout }}
   objectDelay: 1s
   objectWait: true
-  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
   objects:
   - kubeVirtOp: start
     labelSelector:

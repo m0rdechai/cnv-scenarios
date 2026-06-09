@@ -61,7 +61,7 @@ jobs:
   jobPause: {{ .jobPause | default "10m" }}
   cleanup: false
   defaultMissingKeysWithZero: true
-  beforeCleanup: "../../config/scripts/wrapper.sh check_high_memory {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .highMemory | default "450Gi" }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "../../config/scripts/wrapper.sh check_high_memory {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} {{ $nsName }} {{ .highMemory | default "450Gi" }} {{ .privateKey }} {{ .vmUser }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
   objects:
   - objectTemplate: templates/secret_ssh_public.yml
     runOnce: true
@@ -70,6 +70,29 @@ jobs:
       name: {{ $sshPublicKeySecretName }}
       counter: {{ .counter | toString }}
       publicKey: {{ .publicKey }}
+{{- if eq (.guestOS | default "linux") "windows" }}
+  - objectTemplate: vm-high-memory-windows.yml
+    replicas: {{ $vmCount }}
+    waitOptions:
+      labelSelector:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+    inputVars:
+      name: {{ $vmName }}
+      counter: {{ .counter | toString }}
+      OS: windows
+      registryUrl: "{{ .windowsImageUrl }}"
+      cpuCores: {{ .cpuCores | default 16 }}
+      memory: {{ .highMemory | default "450Gi" }}
+      storage: {{ .storage | default "50Gi" }}
+      storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
+      volumemode: Block
+      VMIrunning: {{ .vmRunning | default true }}
+      nodeSelector: {{ .nodeSelector | default "" }}
+      vmUser: {{ .vmUser | default "Administrator" }}
+      sshPublicKeySecret: {{ $sshPublicKeySecretName }}
+      vmLabels:
+        {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- else }}
   - objectTemplate: templates/cloudinit-userdata-secret.yml
     runOnce: true
     replicas: 1
@@ -88,7 +111,6 @@ jobs:
       counter: {{ .counter | toString }}
       OS: {{ .osType | default "rhel9" }}
       cpuCores: {{ .cpuCores | default 16 }}
-      # High memory as per CSV scenario - 450 GiB
       memory: {{ .highMemory | default "450Gi" }}
       storage: {{ .storage | default "50Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
@@ -100,3 +122,4 @@ jobs:
       baseImage: {{ .baseImage | default "quay.io/containerdisks/fedora:41" }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+{{- end }}

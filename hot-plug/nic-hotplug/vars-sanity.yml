@@ -22,9 +22,17 @@ nodeSelector: ""
 cpuCores: 1
 memory: "512Mi"
 
+# VM OS Configuration
+osType: "rhel9"
+
+# Guest OS Configuration (Linux or Windows)
+guestOS: "linux"
+# windowsImageUrl: ""
+
 # Storage Configuration (minimal)
 storage: "10Gi"
 storageClassName: "ocs-storagecluster-ceph-rbd"
+volumeMode: "Block"
 
 # Test Execution Control
 counter: 1
