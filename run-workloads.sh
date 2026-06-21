@@ -588,6 +588,24 @@ run_single_test() {
         logmain DEBUG "[$qualified_name] Auto-set vmUser=Administrator for guestOS=windows"
     fi
 
+    # Auto-set Windows-appropriate maxWaitTimeout (CDI import + boot takes longer).
+    if [[ "$_effective_guest_os" == "windows" && -z "${maxWaitTimeout:-}" ]]; then
+        if grep -q "^maxWaitTimeout:" "$temp_vars" 2>/dev/null; then
+            sed -i "s#^maxWaitTimeout:.*#maxWaitTimeout: \"30m\"#" "$temp_vars"
+        else
+            echo 'maxWaitTimeout: "30m"' >> "$temp_vars"
+        fi
+        logmain DEBUG "[$qualified_name] Auto-set maxWaitTimeout=30m for guestOS=windows"
+    fi
+
+    # Auto-set windowsRootDiskSize when not present (Windows images need >=90Gi).
+    if [[ "$_effective_guest_os" == "windows" && -z "${windowsRootDiskSize:-}" ]]; then
+        if ! grep -q "^windowsRootDiskSize:" "$temp_vars" 2>/dev/null; then
+            echo 'windowsRootDiskSize: "90Gi"' >> "$temp_vars"
+            logmain DEBUG "[$qualified_name] Auto-set windowsRootDiskSize=90Gi for guestOS=windows"
+        fi
+    fi
+
     logmain INFO "[$qualified_name] Starting test"
     logmain INFO "[$qualified_name] Mode: $MODE | OS: $target_os"
     logmain INFO "[$qualified_name] Config: $config_file"

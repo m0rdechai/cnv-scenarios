@@ -2292,7 +2292,7 @@ VALIDATIONS
             echo "    Checking for VirtIO network drivers..."
             local virtio_count
             virtio_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                '(Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*VirtIO*"} | Measure-Object).Count' 2>/dev/null || echo "0")
+                'powershell.exe -NoProfile -Command "(Get-NetAdapter | Where-Object {$_.InterfaceDescription -like \"*VirtIO*\"} | Measure-Object).Count"' 2>/dev/null || echo "0")
             virtio_count=$(echo "${virtio_count}" | head -1 | tr -cd '0-9')
             virtio_count=${virtio_count:-0}
 
@@ -2307,7 +2307,7 @@ VALIDATIONS
             echo "    Checking network interfaces in guest OS..."
             local guest_interface_count
             guest_interface_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                '(Get-NetAdapter | Where-Object {$_.Status -eq "Up"}).Count' 2>/dev/null || echo "0")
+                'powershell.exe -NoProfile -Command "(Get-NetAdapter | Where-Object {$_.Status -eq \"Up\"}).Count"' 2>/dev/null || echo "0")
             guest_interface_count=$(echo "${guest_interface_count}" | head -1 | tr -cd '0-9')
             guest_interface_count=${guest_interface_count:-0}
 
@@ -2323,7 +2323,7 @@ VALIDATIONS
                 echo "    Expected: ${expected_guest_interfaces}, Actual: ${guest_interface_count}"
                 echo "    Guest adapters:"
                 remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                    'Get-NetAdapter | Format-Table Name, InterfaceDescription, Status -AutoSize' 2>/dev/null || echo "    Could not retrieve adapter list"
+                    'powershell.exe -NoProfile -Command "Get-NetAdapter | Format-Table Name, InterfaceDescription, Status -AutoSize"' 2>/dev/null || echo "    Could not retrieve adapter list"
                 return 1
             fi
 
@@ -2332,7 +2332,7 @@ VALIDATIONS
             # Check for test IPs (informational)
             local configured_ips
             configured_ips=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                '(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like "192.168.*"}).Count' 2>/dev/null || echo "0")
+                'powershell.exe -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like \"192.168.*\"}).Count"' 2>/dev/null || echo "0")
             configured_ips=$(echo "${configured_ips}" | head -1 | tr -cd '0-9')
             configured_ips=${configured_ips:-0}
 

@@ -7,6 +7,7 @@
 {{- $sshPublicKeySecretName := $testName -}}
 {{- $sourceStorageSizeStr := (list (.sourceStorageSize | toString) "Mi") | join "" -}}
 {{- $vmStorageSizeStr := (list (.vmStorageSize | toString) "Mi") | join "" -}}
+{{- $windowsVmStorageSizeStr := .windowsRootDiskSize | default "90Gi" -}}
 {{- $jobCounterLabelKey := (list $testName "." $kubeBurnerFQDN "/counter") | join "" -}}
 {{- $jobCounterLabelValue := (list "counter-" (.counter | toString )) | join "" -}}
 {{- $testNamespacesLabelKey := (list $kubeBurnerFQDN "/test-name") | join "" -}}
@@ -132,7 +133,7 @@ jobs:
       cpuRequest: {{ .vmCpuRequest }}
       cpuLimit: {{ .vmCpuLimit }}
       memory: {{ .vmMemory }}
-      storage: {{ $vmStorageSizeStr }}
+      storage: {{ $windowsVmStorageSizeStr }}
       storageclass: {{ .storageClassName }}
       volumemode: Block
       VMIrunning: true

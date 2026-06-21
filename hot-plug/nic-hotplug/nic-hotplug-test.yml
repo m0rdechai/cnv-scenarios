@@ -163,7 +163,7 @@ jobs:
       registryUrl: "{{ .windowsImageUrl }}"
       cpuCores: {{ .cpuCores | default 8 }}
       memory: {{ .memory | default "16Gi" }}
-      storage: {{ .storage | default "50Gi" }}
+      storage: {{ .windowsRootDiskSize | default "90Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: {{ .volumeMode | default "Block" }}
       nicCount: {{ $nicCount }}
@@ -181,7 +181,7 @@ jobs:
       registryUrl: "{{ .windowsImageUrl }}"
       cpuCores: {{ .cpuCores | default 8 }}
       memory: {{ .memory | default "16Gi" }}
-      storage: {{ .storage | default "50Gi" }}
+      storage: {{ .windowsRootDiskSize | default "90Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: {{ .volumeMode | default "Block" }}
       nicCount: {{ $nicCount }}

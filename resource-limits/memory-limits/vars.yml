@@ -40,6 +40,7 @@ volumeMode: "Block"                        # Root volume mode (Windows path uses
 
 guestOS: linux
 # windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
+windowsRootDiskSize: "90Gi"
 
 # Test Execution Control
 counter: 1                                 # Test iteration counter (0 triggers cleanup)

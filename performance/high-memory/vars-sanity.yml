@@ -29,6 +29,7 @@ osType: "fedora"
 # Guest OS Configuration (Linux or Windows)
 guestOS: "linux"
 # windowsImageUrl: ""
+windowsRootDiskSize: "90Gi"
 
 # SSH Configuration
 privateKey: '/home/kni/.ssh/id_rsa'

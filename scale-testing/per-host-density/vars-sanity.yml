@@ -79,3 +79,4 @@ imageUrl: "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud/generic_al
 # Guest OS Configuration (Linux or Windows)
 guestOS: "linux"
 # windowsImageUrl: ""
+windowsRootDiskSize: "90Gi"
