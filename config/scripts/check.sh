@@ -148,7 +148,7 @@ windows_guest_cpu_count_cmd='powershell.exe -NoProfile -Command "(Get-CimInstanc
 # shellcheck disable=SC2016
 windows_guest_memory_mb_cmd='powershell.exe -NoProfile -Command "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB)"'
 # shellcheck disable=SC2016
-windows_guest_data_disk_count_cmd='powershell.exe -NoProfile -Command "(Get-Disk | Where-Object { -not $_.IsSystem }).Count"'
+windows_guest_data_disk_count_cmd='powershell.exe -NoProfile -Command "@(Get-Disk | Where-Object { -not $_.IsSystem }).Count"'
 
 # Windows guest: OS caption (e.g. "Microsoft Windows Server 2022 Datacenter")
 # shellcheck disable=SC2016
@@ -2307,7 +2307,7 @@ VALIDATIONS
             echo "    Checking network interfaces in guest OS..."
             local guest_interface_count
             guest_interface_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                'powershell.exe -NoProfile -Command "(Get-NetAdapter | Where-Object {$_.Status -eq \"Up\"}).Count"' 2>/dev/null || echo "0")
+                'powershell.exe -NoProfile -Command "@(Get-NetAdapter | Where-Object {$_.Status -eq \"Up\"}).Count"' 2>/dev/null || echo "0")
             guest_interface_count=$(echo "${guest_interface_count}" | head -1 | tr -cd '0-9')
             guest_interface_count=${guest_interface_count:-0}
 
@@ -2332,7 +2332,7 @@ VALIDATIONS
             # Check for test IPs (informational)
             local configured_ips
             configured_ips=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                'powershell.exe -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like \"192.168.*\"}).Count"' 2>/dev/null || echo "0")
+                'powershell.exe -NoProfile -Command "@(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like \"192.168.*\"}).Count"' 2>/dev/null || echo "0")
             configured_ips=$(echo "${configured_ips}" | head -1 | tr -cd '0-9')
             configured_ips=${configured_ips:-0}
 
@@ -2773,7 +2773,7 @@ check_high_memory() {
 
             local mem_cmd="free -m | awk 'NR==2{print \$2}'"
             if [ "${guest_os}" = "windows" ]; then
-                mem_cmd='[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB)'
+                mem_cmd='powershell.exe -NoProfile -Command "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB)"'
             fi
 
             for vm in ${vms}; do
@@ -2972,7 +2972,7 @@ check_large_disk() {
             if [ "${guest_os}" = "windows" ]; then
                 local win_disk_count
                 win_disk_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                    '(Get-Disk | Where-Object {-not $_.IsBoot -and -not $_.IsSystem}).Count' 2>/dev/null || echo "0")
+                    'powershell.exe -NoProfile -Command "@(Get-Disk | Where-Object { -not $_.IsSystem }).Count"' 2>/dev/null || echo "0")
                 win_disk_count=$(echo "${win_disk_count}" | head -1 | tr -cd '0-9')
                 win_disk_count=${win_disk_count:-0}
 
@@ -3066,7 +3066,7 @@ check_large_disk() {
                 if [ "${guest_os}" = "windows" ]; then
                     local disk_size_bytes
                     disk_size_bytes=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                        '(Get-Disk | Where-Object {-not $_.IsBoot -and -not $_.IsSystem} | Select-Object -First 1).Size' 2>/dev/null || echo "0")
+                        'powershell.exe -NoProfile -Command "(Get-Disk | Where-Object { -not $_.IsSystem } | Select-Object -First 1).Size"' 2>/dev/null || echo "0")
                     disk_size_bytes=$(echo "${disk_size_bytes}" | head -1 | tr -cd '0-9')
                     disk_size_bytes=${disk_size_bytes:-0}
 
