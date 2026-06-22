@@ -606,6 +606,44 @@ run_single_test() {
         fi
     fi
 
+    # Auto-increase SSH retries for Windows (OpenSSH takes longer to start).
+    if [[ "$_effective_guest_os" == "windows" && -z "${max_ssh_retries:-}" ]]; then
+        if grep -q "^max_ssh_retries:" "$temp_vars" 2>/dev/null; then
+            sed -i "s#^max_ssh_retries:.*#max_ssh_retries: 20#" "$temp_vars"
+        else
+            echo 'max_ssh_retries: 20' >> "$temp_vars"
+        fi
+        logmain DEBUG "[$qualified_name] Auto-set max_ssh_retries=20 for guestOS=windows"
+    fi
+
+    # Auto-increase VM memory for Windows (minimum 2Gi; Linux-sized values cause boot failures).
+    if [[ "$_effective_guest_os" == "windows" && -z "${vmMemory:-}" ]]; then
+        local _current_mem
+        _current_mem=$(grep "^vmMemory:" "$temp_vars" 2>/dev/null | awk '{print $2}' | tr -d '"' | tr -d "'")
+        if [[ -n "$_current_mem" ]]; then
+            local _mem_val=${_current_mem//[!0-9]/}
+            local _mem_unit=${_current_mem//[0-9]/}
+            if [[ "$_mem_unit" == "Mi" && "$_mem_val" -lt 2048 ]] || \
+               [[ "$_mem_unit" == "M" && "$_mem_val" -lt 2048 ]]; then
+                sed -i "s#^vmMemory:.*#vmMemory: \"2Gi\"#" "$temp_vars"
+                logmain DEBUG "[$qualified_name] Auto-increased vmMemory from ${_current_mem} to 2Gi for guestOS=windows"
+            fi
+        fi
+    fi
+    if [[ "$_effective_guest_os" == "windows" && -z "${memory:-}" ]]; then
+        local _current_mem
+        _current_mem=$(grep "^memory:" "$temp_vars" 2>/dev/null | awk '{print $2}' | tr -d '"' | tr -d "'")
+        if [[ -n "$_current_mem" ]]; then
+            local _mem_val=${_current_mem//[!0-9]/}
+            local _mem_unit=${_current_mem//[0-9]/}
+            if [[ "$_mem_unit" == "Mi" && "$_mem_val" -lt 2048 ]] || \
+               [[ "$_mem_unit" == "M" && "$_mem_val" -lt 2048 ]]; then
+                sed -i "s#^memory:.*#memory: \"2Gi\"#" "$temp_vars"
+                logmain DEBUG "[$qualified_name] Auto-increased memory from ${_current_mem} to 2Gi for guestOS=windows"
+            fi
+        fi
+    fi
+
     logmain INFO "[$qualified_name] Starting test"
     logmain INFO "[$qualified_name] Mode: $MODE | OS: $target_os"
     logmain INFO "[$qualified_name] Config: $config_file"

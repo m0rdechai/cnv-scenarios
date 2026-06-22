@@ -143,6 +143,7 @@ function check_vm_running() {
     echo ""
     
     local overall_status="SUCCESS"
+    local running_status="PASS"
     local ssh_validation_status="SKIP"
     local ssh_vms_validated=0
     local ssh_vms_passed=0
@@ -153,6 +154,7 @@ function check_vm_running() {
         echo "ERROR: Not all VMs are running. Expected: ${total_vms}, Running: ${running_vms}"
         log_validation_checkpoint "vm_running_state" "FAIL" "Expected ${total_vms} running, got ${running_vms}"
         overall_status="FAILURE"
+        running_status="FAIL"
     else
         log_validation_checkpoint "vm_running_state" "PASS" "All ${total_vms} VMs are running"
         echo "SUCCESS: All VMs are running"
@@ -185,7 +187,7 @@ function check_vm_running() {
             
             # Shuffle VM list and select required number
             local selected_vms
-            selected_vms=$(echo "${all_vms}" | tr ' ' '\n' | shuf | head -n "${vms_to_validate}")
+            selected_vms=$(echo "${all_vms}" | tr ' ' '\n' | grep -v '^$' | shuf | head -n "${vms_to_validate}")
             
             echo "Randomly selected VMs for SSH validation:"
             echo "${selected_vms}" | head -5
@@ -208,7 +210,7 @@ function check_vm_running() {
                 while [ ${retry_count} -lt ${max_ssh_retries} ] && [ "${ssh_success}" = "false" ]; do
                 local ssh_cmd="hostname && echo SSH_OK"
                 if [ "${guest_os}" = "windows" ]; then
-                    ssh_cmd='$env:COMPUTERNAME; echo SSH_OK'
+                    ssh_cmd='powershell.exe -NoProfile -Command "$env:COMPUTERNAME; echo SSH_OK"'
                 fi
 
                 local ssh_test
@@ -268,9 +270,9 @@ function check_vm_running() {
                 ssh_validation_status="PASS"
                 log_validation_checkpoint "ssh_validation" "PASS" "${ssh_vms_passed}/${ssh_vms_validated} VMs SSH accessible"
             else
-                ssh_validation_status="PARTIAL"
-                log_validation_checkpoint "ssh_validation" "PARTIAL" "${ssh_vms_passed}/${ssh_vms_validated} VMs SSH accessible, ${ssh_vms_failed} failed"
-                # Note: We don't fail overall_status for partial SSH - it's informational
+                ssh_validation_status="FAIL"
+                log_validation_checkpoint "ssh_validation" "FAIL" "${ssh_vms_passed}/${ssh_vms_validated} VMs SSH accessible, ${ssh_vms_failed} failed"
+                overall_status="FAILURE"
             fi
         else
             if [ -z "${private_key}" ] || [ -z "${vm_user}" ]; then
@@ -322,7 +324,7 @@ PARAMS
     validations_json=$(cat <<VALIDATIONS
 [
     {"phase": "vm_discovery", "status": "PASS", "message": "Found ${total_vms} VMs", "duration_seconds": 0},
-    {"phase": "vm_running_state", "status": "$([ "${overall_status}" = "SUCCESS" ] && echo "PASS" || echo "FAIL")", "message": "${running_vms}/${total_vms} VMs running", "duration_seconds": ${running_check_duration}},
+    {"phase": "vm_running_state", "status": "${running_status}", "message": "${running_vms}/${total_vms} VMs running", "duration_seconds": ${running_check_duration}},
     {"phase": "ssh_validation", "status": "${ssh_validation_status}", "message": "${ssh_vms_passed}/${ssh_vms_validated} VMs SSH accessible", "duration_seconds": ${ssh_validation_duration}}
 ]
 VALIDATIONS
