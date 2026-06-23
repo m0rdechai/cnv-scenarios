@@ -79,6 +79,11 @@ cpuCores=8 ./run-workloads.sh cpu-limits --log-level=debug
 
 # Run multiple specific tests
 ./run-workloads.sh cpu-limits memory-limits disk-limits --mode full
+
+# Guest OS selection: linux (default), windows, or both
+./run-workloads.sh cpu-limits --mode sanity --os linux
+windowsImageUrl='http://host:9002/win.qcow2' ./run-workloads.sh cpu-limits --mode sanity --os windows
+windowsImageUrl='http://host:9002/win.qcow2' ./run-workloads.sh --all --mode sanity --os both --parallel
 ```
 
 Results are automatically saved to timestamped directories:
@@ -94,19 +99,19 @@ Results are automatically saved to timestamped directories:
 
 ### Available Tests
 
-| Category | Test | Command |
-|----------|------|---------|
-| Resource Limits | cpu-limits | `./run-workloads.sh cpu-limits` |
-| Resource Limits | memory-limits | `./run-workloads.sh memory-limits` |
-| Resource Limits | disk-limits | `./run-workloads.sh disk-limits` |
-| Hot-plug | disk-hotplug | `./run-workloads.sh disk-hotplug` |
-| Hot-plug | nic-hotplug | `./run-workloads.sh nic-hotplug` |
-| Performance | high-memory | `./run-workloads.sh high-memory` |
-| Performance | large-disk | `./run-workloads.sh large-disk` |
-| Performance | minimal-resources | `./run-workloads.sh minimal-resources` |
-| Scale | per-host-density | `./run-workloads.sh per-host-density` |
-| Scale | virt-capacity-benchmark | `./run-workloads.sh virt-capacity-benchmark` |
-| Database | hammerdb-mssql | `./run-workloads.sh hammerdb-mssql` |
+| Category | Test | OS Support | Command |
+|----------|------|------------|---------|
+| Resource Limits | cpu-limits | both | `./run-workloads.sh cpu-limits` |
+| Resource Limits | memory-limits | both | `./run-workloads.sh memory-limits` |
+| Resource Limits | disk-limits | both | `./run-workloads.sh disk-limits` |
+| Hot-plug | disk-hotplug | both | `./run-workloads.sh disk-hotplug` |
+| Hot-plug | nic-hotplug | both | `./run-workloads.sh nic-hotplug` |
+| Performance | high-memory | both | `./run-workloads.sh high-memory` |
+| Performance | large-disk | both | `./run-workloads.sh large-disk` |
+| Performance | minimal-resources | linux | `./run-workloads.sh minimal-resources` |
+| Scale | per-host-density | both | `./run-workloads.sh per-host-density` |
+| Scale | virt-capacity-benchmark | linux | `./run-workloads.sh virt-capacity-benchmark` |
+| Database | hammerdb-mssql | windows | `./run-workloads.sh hammerdb-mssql` |
 
 ## Directory Structure
 
@@ -135,13 +140,13 @@ cnv-scenarios/
 │   ├── cpu-limits/                   # CPU core limit testing
 │   ├── memory-limits/                # Memory limit testing
 │   └── disk-limits/                  # Disk size limit testing
-├── hot-plug/                         # Hot-plug functionality tests (disk-hotplug: Linux + Windows)
+├── hot-plug/                         # Hot-plug functionality tests (Linux + Windows)
 │   ├── disk-hotplug/                 # Disk hot-plug testing
-│   └── nic-hotplug/                  # NIC hot-plug testing (Linux only)
-├── performance/                      # Performance validation tests
+│   └── nic-hotplug/                  # NIC hot-plug testing
+├── performance/                      # Performance validation tests (Linux + Windows)
 │   ├── high-memory/                  # High memory allocation
 │   ├── large-disk/                   # Large disk performance
-│   └── minimal-resources/            # Minimal resource efficiency
+│   └── minimal-resources/            # Minimal resource efficiency (Linux only)
 ├── database/                         # Database workload tests
 │   └── hammerdb-mssql/               # Windows MSSQL + HammerDB TPC-C benchmark
 └── docs/
@@ -209,7 +214,7 @@ memorySize=450Gi ./run-workloads.sh memory-limits
 **Validations:**
 - VM spec memory matches expected value
 - Guest OS reports correct memory via `free -m` (Linux) or WMI `Win32_ComputerSystem` (Windows) -- within 15% tolerance for OS overhead
-- stress-ng processes running (Linux); skipped on Windows
+- Memory workload running: stress-ng processes (Linux); 4 `CNV_MEM_BURN=1` PowerShell workers bootstrapped via WMI, each allocating 90%/4 of VM memory (Windows)
 
 ### Disk Limits
 
@@ -320,7 +325,7 @@ cleanupNncp=true ./run-workloads.sh nic-hotplug
 - NodeNetworkConfigurationPolicy count matches expected (2 × nicCount)
 - NetworkAttachmentDefinition count matches expected
 - Total NIC count in VM spec matches expected for both VMs
-- Guest OS network interface visibility (optional, via SSH)
+- Guest OS network interface visibility (optional, via SSH): `ip -br link show` (Linux) or VirtIO driver check + `Get-NetAdapter` (Windows)
 
 ## Scale Testing
 
@@ -468,8 +473,8 @@ highMemory=450Gi ./run-workloads.sh high-memory
 
 **Validations:**
 - VM spec memory matches expected value
-- Guest OS reports correct memory via `free -m` (within 15% tolerance for OS overhead)
-- VM responsiveness check via SSH uptime
+- Guest OS reports correct memory via `free -m` (Linux) or WMI `TotalPhysicalMemory` (Windows) -- within 15% tolerance for OS overhead
+- VM responsiveness check via SSH: `uptime` (Linux) or `echo SSH_OK` (Windows)
 
 ### Large Disk
 
@@ -493,9 +498,9 @@ largeDiskSize=100Ti ./run-workloads.sh large-disk
 4. Validate disk configuration via SSH
 
 **Validations:**
-- Large disk visible in guest OS via `lsblk`
+- Large disk visible in guest OS via `lsblk` (Linux) or `Get-Disk` (Windows)
 - Disk size matches expected value (within 5% tolerance)
-- VM responsiveness check via SSH uptime
+- VM responsiveness check via SSH: `uptime` (Linux) or `echo SSH_OK` (Windows)
 
 ### Minimal Resources
 
@@ -538,26 +543,39 @@ minMemory=256Mi ./run-workloads.sh minimal-resources
 
 ## Windows Guest OS Support
 
-Tests that support `guestOS: windows`: **cpu-limits**, **memory-limits**, **disk-limits**, **disk-hotplug**, and **hammerdb-mssql**.
+8 tests support `--os windows` (or `--os both`), plus 1 Windows-only test (hammerdb-mssql). Use the `--os` flag to select the guest OS variant:
 
 ```bash
-# Run Windows cpu-limits (vmUser is auto-set to Administrator)
-guestOS='windows' \
-windowsImageUrl='http://host:port/path/image.qcow2' \
-./run-workloads.sh cpu-limits --mode sanity
+# Run a single test on Windows
+windowsImageUrl='http://host:9002/win.qcow2' \
+./run-workloads.sh cpu-limits --mode sanity --os windows
 
-# Run all Windows resource-limits tests
-guestOS='windows' \
-windowsImageUrl='http://host:port/path/image.qcow2' \
-maxWaitTimeout='45m' storage='90Gi' memory='4Gi' \
-./run-workloads.sh cpu-limits memory-limits disk-limits disk-hotplug --mode sanity
+# Run all compatible tests on both OSes in parallel
+windowsImageUrl='http://host:9002/win.qcow2' \
+./run-workloads.sh --all --mode sanity --os both --parallel
+
+# Linux-only and Windows-only tests are automatically skipped for incompatible OS
 ```
 
-**Key behaviours:**
-- **vmUser auto-detection**: When `guestOS=windows` is set but `vmUser` is not, the runner auto-sets `vmUser=Administrator`.
+### Windows Auto-Corrections
+
+When `--os windows` (or `--os both`) is used, the runner automatically applies safe defaults unless explicitly overridden:
+
+| Variable | Auto-set value | Reason |
+|---|---|---|
+| `vmUser` | `Administrator` | Linux defaults (`fedora`, `cloud-user`) fail SSH to Windows |
+| `maxWaitTimeout` | `30m` | CDI image import + Windows boot is slower than Linux |
+| `windowsRootDiskSize` | `90Gi` | Windows images are much larger than Linux cloud images |
+| `max_ssh_retries` | `20` | Windows SSH service starts later than Linux |
+| `vmMemory` / `memory` | `2Gi` (if below) | Windows Server minimum is 2Gi |
+
+### Key Windows behaviours
+
 - **CPU burn bootstrap**: `cpu-limits` Phase 4 bootstraps `CNV_CPU_BURN=1` worker processes on each Windows VM via SSH using WMI process creation (`Invoke-CimMethod Win32_Process.Create`). No image-side CPU burn helper is required.
-- **PowerShell validation**: Memory, disk, and NIC checks use PowerShell / WMI instead of Linux tools.
-- **CDI import**: Windows images are large (~12 GiB+); use `maxWaitTimeout='45m'` and `storage='90Gi'` for sanity runs.
+- **Memory burn bootstrap**: `memory-limits` Phase 4 bootstraps 4 `CNV_MEM_BURN=1` PowerShell workers that each allocate 90%/4 of VM memory as byte arrays, fill with random data, and touch every 4KB page. Same `Invoke-CimMethod` pattern as CPU burn. No additional software required in the image.
+- **PowerShell validation**: Memory, disk, NIC, and OS checks use PowerShell / WMI instead of Linux tools.
+- **CDI import**: Windows images are large (~12 GiB+); auto-corrections handle timeout and disk sizing.
+- **NIC hot-plug sequencing**: When using `--os both --parallel`, nic-hotplug runs sequentially to avoid NNCP collision between Linux and Windows runs.
 
 See [docs/windows-image-build.md](docs/windows-image-build.md) for image build instructions and per-flow validation details.
 
@@ -678,7 +696,7 @@ All validation functions are wrapped by a retry mechanism (up to 130 retries wit
 | `check_vm_running` | VMs running, SSH accessible, node distribution | Yes (key-based) | Percentage-based validation, JSON reports |
 | `check_vm_shutdown` | VMs in Stopped state | No | JSON reports |
 | `check_cpu_limits` | CPU cores in spec + guest OS (`nproc`/WMI) + stress-ng/CNV_CPU_BURN | Yes (key-based) | Multi-phase; Windows Phase 4 bootstraps CPU burn workers via SSH |
-| `check_memory_limits` | Memory in spec + guest OS (`free -m`/WMI) + stress-ng | Yes (key-based) | 15% tolerance; Windows uses WMI `Win32_ComputerSystem` |
+| `check_memory_limits` | Memory in spec + guest OS (`free -m`/WMI) + stress-ng/CNV_MEM_BURN | Yes (key-based) | 15% tolerance; Windows bootstraps 4 memory burn workers via WMI |
 | `check_disk_limits` | Disk count/size in spec + guest OS (`lsblk`/`Get-Disk`) | Yes (key-based) | Multi-phase; Windows uses `Get-Disk` for non-system disks |
 | `check_disk_hotplug` | Hot-plugged disks in spec + guest OS + mounts | Yes (configurable) | Windows uses `Get-Disk`/`Get-Volume` |
 | `check_nic_hotplug` | NNCPs, NADs, NIC count, VM running, guest interfaces | Yes (optional) | 5-phase validation |
@@ -686,7 +704,7 @@ All validation functions are wrapped by a retry mechanism (up to 130 retries wit
 | `check_high_memory` | High memory allocation + guest OS (`free -m`) | Yes (key-based) | 15% tolerance |
 | `check_large_disk` | Large disk visibility + size in guest OS (`lsblk`) | Yes (key-based) | 4-phase validation |
 | `check_performance_metrics` | System responsiveness (`uptime`, `free -m`, `uname`) | Yes (password-based) | For CirrOS VMs via sshpass |
-| `check_windows_vm` | 10-phase Windows VM validation: SSH, OS version, services, CPU, memory, NICs, disk init, disk count/size, disk utilization, post-process utilization | Yes (key-based, `virtctl ssh` + PowerShell) | `key=value` arg pattern; all phases individually toggle-able; see [Database Testing](#database-testing) |
+| `check_windows_vm` | 11-phase Windows VM validation: SSH, OS version, services, CPU, memory, NICs, disk init, disk count/size, disk utilization, post-process utilization | Yes (key-based, `virtctl ssh` + PowerShell) | `key=value` arg pattern; all phases individually toggle-able; see [Database Testing](#database-testing) |
 
 ## Advanced Usage
 
@@ -702,6 +720,13 @@ The unified `run-workloads.sh` script is the recommended way to run all tests:
 ./run-workloads.sh cpu-limits --mode sanity     # Uses vars-sanity.yml
 ./run-workloads.sh cpu-limits --mode full       # Uses vars.yml (default)
 
+# Guest OS selection
+./run-workloads.sh cpu-limits --mode sanity --os linux      # Linux only (default)
+windowsImageUrl='http://host:9002/win.qcow2' \
+./run-workloads.sh cpu-limits --mode sanity --os windows    # Windows only
+windowsImageUrl='http://host:9002/win.qcow2' \
+./run-workloads.sh cpu-limits --mode sanity --os both       # Both OSes
+
 # Override variables
 cpuCores=8 ./run-workloads.sh cpu-limits --log-level=debug
 
@@ -711,7 +736,7 @@ cpuCores=8 ./run-workloads.sh cpu-limits --log-level=debug
 # All tests in parallel
 ./run-workloads.sh --all --parallel --mode sanity
 
-# List available tests
+# List available tests (shows OS support per test)
 ./run-workloads.sh --list
 ```
 
@@ -786,7 +811,7 @@ vmPassword: 'gocubsgo'                  # Set via cloud-init in VM template
 
 Note: Password-based SSH uses `sshpass` with `virtctl ssh`. Ensure `sshpass` is installed.
 
-**Windows guests**: Set `guestOS: windows` in vars. When `guestOS=windows` and `vmUser` is not explicitly overridden, `run-workloads.sh` auto-sets `vmUser=Administrator`. SSH uses `virtctl ssh` with key-based auth and `qemuGuestAgent` credential propagation. Validation commands run PowerShell over SSH.
+**Windows guests**: Use `--os windows` (or `--os both`). The runner auto-corrects `vmUser`, `maxWaitTimeout`, `windowsRootDiskSize`, `max_ssh_retries`, and `vmMemory` (see [Windows Auto-Corrections](#windows-auto-corrections)). SSH uses `virtctl ssh` with key-based auth and `qemuGuestAgent` credential propagation. Validation commands run PowerShell over SSH.
 
 ## Sanity and Full Testing with run-workloads.sh
 
@@ -794,9 +819,10 @@ The unified `run-workloads.sh` script supports both quick sanity tests and full 
 
 ### Overview
 
-The test runner supports two modes:
+The test runner supports two modes and guest OS selection:
 - **Sanity mode** (`--mode sanity`): Uses `vars-sanity.yml` for quick validation
 - **Full mode** (`--mode full`): Uses `vars.yml` for production regression testing
+- **OS selection** (`--os linux|windows|both`): Selects guest OS variant. Linux-only and Windows-only tests are automatically filtered.
 
 Sanity tests use minimal configurations:
 - **Minimal resources**: 1-2 VMs, 1 CPU core, 512Mi-1Gi memory
@@ -820,6 +846,10 @@ cd cnv-scenarios
 
 # Sequential mode for debugging
 ./run-workloads.sh disk-limits --mode sanity
+
+# Run both Linux and Windows sanity tests
+windowsImageUrl='http://host:9002/win.qcow2' \
+./run-workloads.sh --all --mode sanity --os both --parallel
 ```
 
 ### Using Makefile Targets
@@ -969,16 +999,16 @@ oc get vmis -n <namespace>
 
 ## Test Matrix Summary
 
-| Category | Scenario | Config File | Key Parameters | Windows |
-|----------|----------|-------------|----------------|---------|
-| Resource Limits | CPU | cpu-limits-test.yml | `cpuCores=32` | Yes |
-| Resource Limits | Memory | memory-limits-test.yml | `memorySize=450Gi` | Yes |
-| Resource Limits | Disk | disk-limits-test.yml | `diskCount=4 diskSize=100Gi` | Yes |
-| Hot-plug | Disks | disk-hotplug-test.yml | `diskCount=256 pvcSize=1Gi` | Yes |
-| Hot-plug | NICs | nic-hotplug-test.yml | `nicCount=28` | No |
-| Scale | Per-Host | per-host-density.yml | `vmsPerNamespace=460 scaleMode=single-node cleanup=true` | No |
-| Scale | Capacity | virt-capacity-benchmark.yml | `vmCount=5 percentage_of_vms_to_validate=25` | No |
-| Performance | Large Disk | large-disk-performance.yml | `largeDiskSize=100Ti` | No |
-| Performance | High Memory | high-memory-performance.yml | `highMemory=450Gi` | No |
-| Performance | Minimal | minimal-resources-test.yml | `minMemory=128Mi minCpu=100m minStorage=1Gi` | No |
-| Database | HammerDB/MSSQL | hammerdb-mssql-test.yml | `cpuCores=8 memory=16Gi dataDisks=3 diskSize=100Gi windowsImageUrl=docker://...` | Yes (only) |
+| Category | Scenario | Config File | Key Parameters | OS Support |
+|----------|----------|-------------|----------------|------------|
+| Resource Limits | CPU | cpu-limits-test.yml | `cpuCores=32` | both |
+| Resource Limits | Memory | memory-limits-test.yml | `memorySize=450Gi` | both |
+| Resource Limits | Disk | disk-limits-test.yml | `diskCount=4 diskSize=100Gi` | both |
+| Hot-plug | Disks | disk-hotplug-test.yml | `diskCount=256 pvcSize=1Gi` | both |
+| Hot-plug | NICs | nic-hotplug-test.yml | `nicCount=28` | both |
+| Scale | Per-Host | per-host-density.yml | `vmsPerNamespace=460 scaleMode=single-node cleanup=true` | both |
+| Scale | Capacity | virt-capacity-benchmark.yml | `vmCount=5 percentage_of_vms_to_validate=25` | linux |
+| Performance | Large Disk | large-disk-performance.yml | `largeDiskSize=100Ti` | both |
+| Performance | High Memory | high-memory-performance.yml | `highMemory=450Gi` | both |
+| Performance | Minimal | minimal-resources-test.yml | `minMemory=128Mi minCpu=100m minStorage=1Gi` | linux |
+| Database | HammerDB/MSSQL | hammerdb-mssql-test.yml | `cpuCores=8 memory=16Gi dataDisks=3 diskSize=100Gi windowsImageUrl=docker://...` | windows |
