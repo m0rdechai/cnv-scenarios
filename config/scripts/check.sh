@@ -160,6 +160,12 @@ windows_guest_nic_count_cmd='powershell.exe -NoProfile -Command "@(Get-NetAdapte
 
 # Windows guest: filter used to exclude the validation command from self-counting
 windows_guest_cpu_burn_filter='($_.CommandLine -like '"'"'*CNV_CPU_BURN=1*'"'"') -and ($_.CommandLine -notlike '"'"'*Get-CimInstance Win32_Process*'"'"')'
+# Windows guest: memory burn process filter (CNV_MEM_BURN=1 marker)
+windows_guest_mem_burn_filter='($_.CommandLine -like '"'"'*CNV_MEM_BURN=1*'"'"') -and ($_.CommandLine -notlike '"'"'*Get-CimInstance Win32_Process*'"'"')'
+# shellcheck disable=SC2016
+windows_guest_mem_burn_count_cmd="powershell.exe -NoProfile -Command \"@(Get-CimInstance Win32_Process | Where-Object { ${windows_guest_mem_burn_filter} }).Count\""
+# shellcheck disable=SC2016
+windows_guest_free_memory_mb_cmd='powershell.exe -NoProfile -Command "[math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1KB)"'
 # Windows guest: detailed list of CPU burn helper processes for diagnostics
 # shellcheck disable=SC2016
 windows_guest_cpu_burn_count_cmd="powershell.exe -NoProfile -Command \"@(Get-CimInstance Win32_Process | Where-Object { ${windows_guest_cpu_burn_filter} }).Count\""
@@ -781,13 +787,113 @@ check_memory_limits() {
         log_validation_checkpoint "guest_os_memory" "SKIP" "SSH credentials not provided"
     fi
 
-    # Phase 4: Check stress-ng processes (Linux only; not used on Windows guests)
+    # Phase 4: Memory workload validation
+    # Linux: verify stress-ng processes launched by cloud-init are running
+    # Windows: bootstrap PowerShell memory burn workers (CNV_MEM_BURN=1), then verify
+    local expected_workers=4
     if [ "${overall_status}" = "SUCCESS" ] && [ -n "${private_key}" ] && [ -n "${vm_user}" ]; then
         echo ""
         if [ "${guest_os}" = "windows" ]; then
-            echo "[Phase 4/4] Skipping stress-ng memory workload check (not applicable on Windows)"
-            log_validation_checkpoint "stress_ng_processes" "SKIP" "stress-ng not used on Windows; see docs/windows-image-build.md"
-            stress_ng_validation_status="SKIP"
+            echo "[Phase 4/4] Bootstrapping and checking Windows memory burn workers (CNV_MEM_BURN=1)..."
+
+            # Calculate per-worker memory: 90% of expected_memory / expected_workers
+            local stress_total_mb=0
+            if [[ "${expected_memory}" =~ ^([0-9]+)Gi$ ]]; then
+                stress_total_mb=$((${BASH_REMATCH[1]} * 1024 * 90 / 100))
+            elif [[ "${expected_memory}" =~ ^([0-9]+)Mi$ ]]; then
+                stress_total_mb=$((${BASH_REMATCH[1]} * 90 / 100))
+            elif [[ "${expected_memory}" =~ ^([0-9]+)G$ ]]; then
+                stress_total_mb=$((${BASH_REMATCH[1]} * 1000 * 90 / 100))
+            elif [[ "${expected_memory}" =~ ^([0-9]+)M$ ]]; then
+                stress_total_mb=$((${BASH_REMATCH[1]} * 90 / 100))
+            fi
+            local per_worker_mb=$((stress_total_mb / expected_workers))
+            # Minimum 32MB per worker to be meaningful
+            [ "${per_worker_mb}" -lt 32 ] && per_worker_mb=32
+
+            echo "  Memory budget: ${stress_total_mb}MB total (90% of ${expected_memory}), ${per_worker_mb}MB per worker, ${expected_workers} workers"
+
+            # Build bootstrap script: each worker allocates a byte array and touches every page in a loop.
+            # Uses CNV_MEM_BURN=1 environment marker for process identification.
+            local ps_script
+            # shellcheck disable=SC2016
+            ps_script='$perWorkerMB = '${per_worker_mb}'; $workers = '${expected_workers}'; '
+            ps_script+='$workerCmd = "powershell.exe -NoProfile -Command `$env:CNV_MEM_BURN=1; '
+            ps_script+='[long]`$sz = '${per_worker_mb}' * 1048576; '
+            ps_script+='`$buf = New-Object byte[] `$sz; '
+            ps_script+='`$rng = New-Object System.Random; '
+            ps_script+='while(`$true){ '
+            ps_script+='`$rng.NextBytes(`$buf); '
+            ps_script+='for(`$i=0;`$i -lt `$buf.Length;`$i+=4096){`$buf[`$i]=[byte](`$buf[`$i] -bxor 0xFF)} '
+            ps_script+='}"; '
+            ps_script+='1..$workers | ForEach-Object { [void](Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}) }; '
+            ps_script+='"STARTED=$workers"'
+
+            local encoded_bootstrap
+            encoded_bootstrap=$(printf '%s' "${ps_script}" | iconv -t UTF-16LE | base64 -w 0)
+
+            for vm in ${vms}; do
+                echo "  Bootstrapping memory burn workers on ${vm}..."
+
+                # Check if workers are already running (idempotent)
+                local existing_count
+                existing_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "${windows_guest_mem_burn_count_cmd}" 2>/dev/null || echo "0")
+                existing_count=$(echo "${existing_count}" | head -1 | tr -cd '0-9')
+                existing_count=${existing_count:-0}
+
+                if [ "${existing_count}" -ge "${expected_workers}" ]; then
+                    echo "    Already running ${existing_count} worker(s), skipping bootstrap"
+                    continue
+                fi
+
+                # Capture free memory before bootstrap for pressure validation
+                local free_mem_before
+                free_mem_before=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "${windows_guest_free_memory_mb_cmd}" 2>/dev/null || echo "0")
+                free_mem_before=$(echo "${free_mem_before}" | head -1 | tr -cd '0-9')
+                free_mem_before=${free_mem_before:-0}
+                echo "    Free memory before bootstrap: ${free_mem_before}MB"
+
+                local bootstrap_result
+                bootstrap_result=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "powershell.exe -NoProfile -EncodedCommand ${encoded_bootstrap}" 2>/dev/null || echo "BOOTSTRAP_FAILED")
+                echo "    Result: ${bootstrap_result}"
+            done
+
+            echo "  Waiting 15 seconds for workers to allocate memory..."
+            sleep 15
+
+            # Verify worker count and memory pressure
+            for vm in ${vms}; do
+                echo "  Checking ${vm}..."
+
+                local stress_process_count
+                stress_process_count=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "${windows_guest_mem_burn_count_cmd}" 2>/dev/null || echo "0")
+                stress_process_count=$(echo "${stress_process_count}" | head -1 | tr -cd '0-9')
+                stress_process_count=${stress_process_count:-0}
+
+                if [ "${stress_process_count}" -ne "${expected_workers}" ]; then
+                    echo "  ✗ ${vm}: Windows memory burn process count mismatch"
+                    echo "    Expected: ${expected_workers} (marker CNV_MEM_BURN=1), Actual: ${stress_process_count}"
+                    log_validation_checkpoint "stress_ng_processes" "FAIL" "Expected ${expected_workers} workers, got ${stress_process_count}"
+                    overall_status="FAILED"
+                    break
+                fi
+
+                # Check memory pressure: free memory should have dropped
+                local free_mem_after
+                free_mem_after=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "${windows_guest_free_memory_mb_cmd}" 2>/dev/null || echo "0")
+                free_mem_after=$(echo "${free_mem_after}" | head -1 | tr -cd '0-9')
+                free_mem_after=${free_mem_after:-0}
+                echo "    Free memory after bootstrap: ${free_mem_after}MB"
+
+                echo "  ✓ ${vm}: ${stress_process_count} memory burn worker(s) running, free memory dropped to ${free_mem_after}MB"
+                log_validation_checkpoint "stress_ng_processes" "PASS" "VM ${vm}: ${stress_process_count} CNV_MEM_BURN workers, free=${free_mem_after}MB"
+                stress_ng_validation_status="PASS"
+            done
         else
             echo "[Phase 4/4] Checking stress-ng memory processes..."
             for vm in ${vms}; do
@@ -800,18 +906,20 @@ check_memory_limits() {
                 stress_process_count=${stress_process_count:-0}
 
                 if [ "${stress_process_count}" -eq 0 ]; then
-                    echo "  ⚠ ${vm}: No stress-ng processes found (test may not be running)"
-                    log_validation_checkpoint "stress_ng_processes" "SKIP" "No stress-ng processes found"
-                else
-                    echo "  ✓ ${vm}: ${stress_process_count} stress-ng process(es) running"
-                    log_validation_checkpoint "stress_ng_processes" "PASS" "VM ${vm}: ${stress_process_count} stress-ng process(es) running"
-                    stress_ng_validation_status="PASS"
+                    echo "  ✗ ${vm}: No stress-ng processes found"
+                    log_validation_checkpoint "stress_ng_processes" "FAIL" "No stress-ng processes found"
+                    overall_status="FAILED"
+                    break
                 fi
+
+                echo "  ✓ ${vm}: ${stress_process_count} stress-ng process(es) running"
+                log_validation_checkpoint "stress_ng_processes" "PASS" "VM ${vm}: ${stress_process_count} stress-ng process(es) running"
+                stress_ng_validation_status="PASS"
             done
         fi
     else
         echo ""
-        echo "[Phase 4/4] Skipping stress-ng process validation (no SSH credentials)"
+        echo "[Phase 4/4] Skipping memory workload validation (no SSH credentials)"
         log_validation_checkpoint "stress_ng_processes" "SKIP" "SSH credentials not provided"
     fi
 
