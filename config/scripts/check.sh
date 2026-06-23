@@ -680,8 +680,8 @@ check_memory_limits() {
     if [ -z "${vms}" ] || [ "${vm_count}" -eq 0 ]; then
         echo "✗ No VMs found with label ${label_key}=${label_value}"
         log_validation_checkpoint "vm_discovery" "FAIL" "No VMs found"
-        log_validation_end "FAILURE" "$(($(date +%s) - start_time))s"
-        save_validation_report "memory-limits" "FAILURE" "${namespace}" "{}" "{}" "${results_dir}"
+        log_validation_end "FAILED" "$(($(date +%s) - start_time))s"
+        save_validation_report "memory-limits" "FAILED" "${namespace}" "{}" "{}" "${results_dir}"
         return 1
     fi
 
@@ -704,7 +704,7 @@ check_memory_limits() {
         if [ "${actual_memory}" != "${expected_memory}" ]; then
             echo "  ✗ ${vm}: Memory mismatch. Expected: ${expected_memory}, Actual: ${actual_memory}"
             log_validation_checkpoint "vm_spec_memory" "FAIL" "Expected ${expected_memory}, got ${actual_memory}"
-            overall_status="FAILURE"
+            overall_status="FAILED"
             break
         fi
         echo "  ✓ ${vm}: ${actual_memory} memory in spec"
@@ -743,7 +743,7 @@ check_memory_limits() {
             if [ "${guest_memory_mb}" -eq 0 ]; then
                 echo "  ✗ ${vm}: Failed to retrieve memory from guest OS"
                 log_validation_checkpoint "guest_os_memory" "FAIL" "Could not retrieve memory"
-                overall_status="FAILURE"
+                overall_status="FAILED"
                 break
             fi
 
@@ -773,7 +773,7 @@ check_memory_limits() {
             if [ "${guest_memory_mb}" -lt "${min_memory}" ] || [ "${guest_memory_mb}" -gt "${max_memory}" ]; then
                 echo "  ✗ ${vm}: Guest OS memory ${guest_memory_mb}MB outside expected range"
                 log_validation_checkpoint "guest_os_memory" "FAIL" "Expected ~${expected_memory_mb}MB, got ${guest_memory_mb}MB"
-                overall_status="FAILURE"
+                overall_status="FAILED"
                 break
             fi
 
@@ -957,7 +957,7 @@ PARAMS
 
     # Generate validations JSON
     local spec_status="PASS"
-    [ "${overall_status}" = "FAILURE" ] && spec_status="FAIL"
+    [ "${overall_status}" = "FAILED" ] && spec_status="FAIL"
 
     local validations_json
     validations_json=$(
@@ -1018,8 +1018,8 @@ check_disk_limits() {
     if [ -z "${vms}" ] || [ "${vm_count}" -eq 0 ]; then
         echo "✗ No VMs found with label ${label_key}=${label_value}"
         log_validation_checkpoint "vm_discovery" "FAIL" "No VMs found"
-        log_validation_end "FAILURE" "$(($(date +%s) - start_time))s"
-        save_validation_report "disk-limits" "FAILURE" "${namespace}" "{}" "{}" "${results_dir}"
+        log_validation_end "FAILED" "$(($(date +%s) - start_time))s"
+        save_validation_report "disk-limits" "FAILED" "${namespace}" "{}" "{}" "${results_dir}"
         return 1
     fi
 
@@ -1042,7 +1042,7 @@ check_disk_limits() {
         if [ "${actual_disk_count}" != "${expected_disk_count}" ]; then
             echo "  ✗ ${vm}: Disk count mismatch. Expected: ${expected_disk_count}, Actual: ${actual_disk_count}"
             log_validation_checkpoint "vm_spec_disk_count" "FAIL" "Expected ${expected_disk_count}, got ${actual_disk_count}"
-            overall_status="FAILURE"
+            overall_status="FAILED"
             break
         fi
         echo "  ✓ ${vm}: ${actual_disk_count} data disk(s) in spec"
@@ -1063,7 +1063,7 @@ check_disk_limits() {
                 if [ "${dv_size}" != "${expected_disk_size}" ]; then
                     echo "  ✗ ${vm}: Disk size mismatch. Expected: ${expected_disk_size}, Actual: ${dv_size}"
                     log_validation_checkpoint "vm_spec_disk_size" "FAIL" "Expected ${expected_disk_size}, got ${dv_size}"
-                    overall_status="FAILURE"
+                    overall_status="FAILED"
                     break 2
                 fi
             done
@@ -1104,7 +1104,7 @@ check_disk_limits() {
                 if [ $? -ne 0 ] || [ -z "${blk_devices}" ]; then
                     echo "  ✗ ${vm}: Failed to get block devices"
                     log_validation_checkpoint "guest_os_disk_count" "FAIL" "Could not retrieve block devices"
-                    overall_status="FAILURE"
+                    overall_status="FAILED"
                     break
                 fi
 
@@ -1114,7 +1114,7 @@ check_disk_limits() {
             if [ "${guest_disk_count}" != "${expected_disk_count}" ]; then
                 echo "  ✗ ${vm}: Guest disk count mismatch. Expected: ${expected_disk_count}, Actual: ${guest_disk_count}"
                 log_validation_checkpoint "guest_os_disk_count" "FAIL" "Expected ${expected_disk_count}, got ${guest_disk_count}"
-                overall_status="FAILURE"
+                overall_status="FAILED"
                 break
             fi
 
@@ -1156,7 +1156,7 @@ check_disk_limits() {
                     if (($(echo "${size_diff} > ${tolerance}" | bc -l))) && (($(echo "${size_diff} > 1" | bc -l))); then
                         echo "  ✗ ${vm}: Guest disk size mismatch (Windows). Expected: ~${expected_disk_size}, Actual: ${guest_gb}Gi"
                         log_validation_checkpoint "guest_os_disk_size" "FAIL" "Expected ~${expected_size_numeric}G, got ${guest_gb}G"
-                        overall_status="FAILURE"
+                        overall_status="FAILED"
                         break 2
                     fi
                 done <<<"${size_lines}"
@@ -1183,7 +1183,7 @@ check_disk_limits() {
                     if (($(echo "${size_diff} > ${tolerance}" | bc -l))) && (($(echo "${size_diff} > 1" | bc -l))); then
                         echo "  ✗ ${vm}: Guest disk size mismatch. Expected: ~${expected_disk_size}, Actual: ${guest_size}"
                         log_validation_checkpoint "guest_os_disk_size" "FAIL" "Expected ~${expected_size_numeric}G, got ${guest_size}"
-                        overall_status="FAILURE"
+                        overall_status="FAILED"
                         break 2
                     fi
                 done
@@ -1234,7 +1234,7 @@ PARAMS
 
     # Generate validations JSON
     local spec_status="PASS"
-    [ "${overall_status}" = "FAILURE" ] && spec_status="FAIL"
+    [ "${overall_status}" = "FAILED" ] && spec_status="FAIL"
 
     local validations_json
     validations_json=$(
