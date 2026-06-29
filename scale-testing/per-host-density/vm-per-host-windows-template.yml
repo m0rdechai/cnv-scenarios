@@ -131,16 +131,11 @@ spec:
       name: dvclone-{{.counter}}-{{.Replica}}
     spec:
       source:
-{{- if hasPrefix .registryUrl "docker://" }}
-        registry:
-          url: {{ .registryUrl }}
-{{- else }}
-        http:
-          url: {{ .registryUrl }}
-{{- end }}
+        pvc:
+          name: per-host-source
       storage:
         accessModes:
-        - ReadWriteOnce
+        - ReadWriteMany
         resources:
           requests:
             storage: {{.storage}}

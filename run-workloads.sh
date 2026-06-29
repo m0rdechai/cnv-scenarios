@@ -579,6 +579,17 @@ run_single_test() {
         echo "guestOS: \"${target_os}\"" >> "$temp_vars"
     fi
 
+    # When running --os both, namespace prefixes must be OS-qualified to avoid collision.
+    # Append -<os> to testNamespacePrefix so Linux and Windows land in separate namespaces.
+    if [[ "$OS_FLAG" == "both" ]]; then
+        if grep -q "^testNamespacePrefix:" "$temp_vars" 2>/dev/null; then
+            local _current_prefix
+            _current_prefix=$(grep "^testNamespacePrefix:" "$temp_vars" | head -1 | awk '{print $2}' | tr -d "\"'")
+            sed -i "s#^testNamespacePrefix:.*#testNamespacePrefix: \"${_current_prefix}-${target_os}\"#" "$temp_vars"
+            logmain DEBUG "[$qualified_name] Qualified testNamespacePrefix to ${_current_prefix}-${target_os} for --os both"
+        fi
+    fi
+
     # Auto-correct vmUser when guestOS is switched to windows but vmUser was not
     # explicitly overridden (Linux defaults like 'fedora'/'cloud-user' won't work).
     local _effective_guest_os

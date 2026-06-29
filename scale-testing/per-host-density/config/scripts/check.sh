@@ -74,6 +74,13 @@ function check_vm_running() {
     local max_ssh_retries="${7:-8}"
     local results_dir="${8:-/tmp/kube-burner-validations}"
     local guest_os="${9:-linux}"
+    local run_uuid="${10:-}"
+    
+    # Build label selector -- always include job counter label
+    local label_selector="${label_key}=${label_value}"
+    if [ -n "${run_uuid}" ]; then
+        label_selector="${label_selector},kube-burner.io/uuid=${run_uuid}"
+    fi
     
     # Set up logging
     mkdir -p "${results_dir}"
@@ -90,6 +97,7 @@ function check_vm_running() {
     echo "=============================================="
     echo "Namespace:         ${namespace}"
     echo "Label:             ${label_key}=${label_value}"
+    echo "Run UUID:          ${run_uuid:-all runs}"
     echo "SSH User:          ${vm_user:-not provided}"
     echo "Guest OS:          ${guest_os}"
     echo "SSH Validation:    ${percentage_to_validate}%"
@@ -102,7 +110,7 @@ function check_vm_running() {
     
     # VM Discovery
     local total_vms
-    total_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" --no-headers 2>/dev/null | wc -l)
+    total_vms=$(oc get vm ${ns_flag} -l "${label_selector}" --no-headers 2>/dev/null | wc -l)
     
     if [ "${total_vms}" -eq 0 ]; then
         echo "ERROR: No VMs found with label ${label_key}=${label_value}"
@@ -122,7 +130,7 @@ function check_vm_running() {
     # Running State Check
     local running_check_start=$(date +%s)
     local running_vms
-    running_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" -o jsonpath='{.items[?(@.status.ready==true)].metadata.name}' | wc -w)
+    running_vms=$(oc get vm ${ns_flag} -l "${label_selector}" -o jsonpath='{.items[?(@.status.ready==true)].metadata.name}' | wc -w)
     local running_check_duration=$(( $(date +%s) - running_check_start ))
     
     echo "Running VMs: ${running_vms}/${total_vms}"
@@ -132,7 +140,7 @@ function check_vm_running() {
     echo ""
     echo "VM Distribution by Node:"
     local node_distribution
-    node_distribution=$(oc get vmi ${ns_flag} -l "${label_key}=${label_value}" \
+    node_distribution=$(oc get vmi ${ns_flag} -l "${label_selector}" \
         -o jsonpath='{range .items[*]}{.status.nodeName}{"\n"}{end}' 2>/dev/null | \
         sort | uniq -c | sort -rn || echo "  Unable to get node distribution")
     if [ -n "${node_distribution}" ]; then
@@ -180,9 +188,9 @@ function check_vm_running() {
             # Get all VM names with their namespaces (format: namespace/vmname)
             local all_vms
             if [ "${namespace}" = "all" ]; then
-                all_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" "}{end}')
+                all_vms=$(oc get vm ${ns_flag} -l "${label_selector}" -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" "}{end}')
             else
-                all_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" "}{end}')
+                all_vms=$(oc get vm ${ns_flag} -l "${label_selector}" -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{" "}{end}')
             fi
             
             # Shuffle VM list and select required number
@@ -291,7 +299,7 @@ function check_vm_running() {
     
     # Get node distribution for JSON report
     local node_count
-    node_count=$(oc get vmi ${ns_flag} -l "${label_key}=${label_value}" \
+    node_count=$(oc get vmi ${ns_flag} -l "${label_selector}" \
         -o jsonpath='{range .items[*]}{.status.nodeName}{"\n"}{end}' 2>/dev/null | \
         sort -u | wc -l || echo "0")
     
@@ -348,6 +356,13 @@ function check_vm_shutdown() {
     local label_value="$2"
     local namespace="$3"
     local results_dir="${4:-/tmp/kube-burner-validations}"
+    local run_uuid="${5:-}"
+    
+    # Build label selector -- always include job counter label
+    local label_selector="${label_key}=${label_value}"
+    if [ -n "${run_uuid}" ]; then
+        label_selector="${label_selector},kube-burner.io/uuid=${run_uuid}"
+    fi
     
     # Set up logging
     mkdir -p "${results_dir}"
@@ -364,6 +379,7 @@ function check_vm_shutdown() {
     echo "=============================================="
     echo "Namespace:   ${namespace}"
     echo "Label:       ${label_key}=${label_value}"
+    echo "Run UUID:    ${run_uuid:-all runs}"
     echo "Results Dir: ${results_dir}"
     echo ""
     
@@ -372,7 +388,7 @@ function check_vm_shutdown() {
     
     # VM Discovery
     local total_vms
-    total_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" --no-headers 2>/dev/null | wc -l)
+    total_vms=$(oc get vm ${ns_flag} -l "${label_selector}" --no-headers 2>/dev/null | wc -l)
     
     if [ "${total_vms}" -eq 0 ]; then
         echo "ERROR: No VMs found with label ${label_key}=${label_value}"
@@ -392,7 +408,7 @@ function check_vm_shutdown() {
     # Shutdown State Check
     local shutdown_check_start=$(date +%s)
     local stopped_vms
-    stopped_vms=$(oc get vm ${ns_flag} -l "${label_key}=${label_value}" -o jsonpath='{.items[?(@.spec.runStrategy=="Halted")].metadata.name}' | wc -w)
+    stopped_vms=$(oc get vm ${ns_flag} -l "${label_selector}" -o jsonpath='{.items[?(@.spec.runStrategy=="Halted")].metadata.name}' | wc -w)
     local shutdown_check_duration=$(( $(date +%s) - shutdown_check_start ))
     
     echo "Stopped VMs: ${stopped_vms}/${total_vms}"
@@ -460,8 +476,8 @@ case "$1" in
     *)
         echo "Usage: $0 {check_vm_running|check_vm_shutdown} [args...]"
         echo ""
-        echo "check_vm_running <label_key> <label_value> <namespace> [private_key] [vm_user] [percentage_to_validate] [max_ssh_retries] [results_dir]"
-        echo "check_vm_shutdown <label_key> <label_value> <namespace> [results_dir]"
+        echo "check_vm_running <label_key> <label_value> <namespace> [private_key] [vm_user] [percentage_to_validate] [max_ssh_retries] [results_dir] [guest_os] [run_uuid]"
+        echo "check_vm_shutdown <label_key> <label_value> <namespace> [results_dir] [run_uuid]"
         exit 1
         ;;
 esac

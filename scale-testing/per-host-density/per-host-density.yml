@@ -55,7 +55,6 @@ jobs:
       {{ $testNamespacesLabelKey }}: {{ $testName }}
 {{ end }}
 
-{{- if ne (.guestOS | default "linux") "windows" }}
 # Create source DataVolume first (one per namespace).
 # customStatusPaths: kube-burner evaluates `key` as jq against the object's .status
 # (not the full resource). For CDI DataVolume, wait until .phase is Succeeded.
@@ -81,11 +80,15 @@ jobs:
         value: 'Succeeded'
     inputVars:
       name: per-host-source
+{{- if eq (.guestOS | default "linux") "windows" }}
+      storage: {{ $windowsVmStorageSizeStr }}
+      imageUrl: "{{ .windowsImageUrl }}"
+{{- else }}
       storage: {{ $sourceStorageSizeStr }}
-      storageclass: {{ .storageClassName }}
-      volumemode: Block
       imageUrl: {{ .imageUrl }}
 {{- end }}
+      storageclass: {{ .storageClassName }}
+      volumemode: Block
 
 # Create VMs - supports single-node or multi-node distribution
 - name: create-vms
@@ -109,7 +112,7 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }} {{ .UUID }}"
   objects:
   - objectTemplate: templates/ssh-secret.yml
     runOnce: true
@@ -128,7 +131,6 @@ jobs:
       counter: {{ .counter | toString }}
       sshPublicKeySecret: {{ $testName }}-ssh
       OS: windows
-      registryUrl: "{{ .windowsImageUrl }}"
       vmUser: {{ .vmUser | default "Administrator" }}
       cpuRequest: {{ .vmCpuRequest }}
       cpuLimit: {{ .vmCpuLimit }}
@@ -177,11 +179,12 @@ jobs:
   maxWaitTimeout: 30m
   objectDelay: 10s
   objectWait: true
-  beforeCleanup: "config/scripts/check.sh check_vm_shutdown {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_shutdown {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .UUID }}"
   objects:
   - kubeVirtOp: stop
     labelSelector:
       {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+      kube-burner.io/uuid: {{ .UUID }}
 
 # Sleep between phases
 - name: sleep-between-phases
@@ -214,9 +217,10 @@ jobs:
   maxWaitTimeout: {{ .maxWaitTimeout }}
   objectDelay: 1s
   objectWait: true
-  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }} {{ .UUID }}"
   objects:
   - kubeVirtOp: start
     labelSelector:
       {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
+      kube-burner.io/uuid: {{ .UUID }}
 {{ end }}

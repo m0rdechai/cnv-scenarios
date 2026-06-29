@@ -6,8 +6,13 @@ metadata:
   name: {{.name}}
 spec:
   source:
+{{- if hasPrefix .imageUrl "docker://" }}
+    registry:
+      url: {{ .imageUrl }}
+{{- else }}
     http:
         url: {{.imageUrl}}
+{{- end }}
   storage:
     accessModes:
     - ReadWriteMany
