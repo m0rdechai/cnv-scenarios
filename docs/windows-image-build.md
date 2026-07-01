@@ -84,19 +84,67 @@ If workers are already running when validation starts, the bootstrap is skipped 
 
 - **SQL Server 2022** (Express or higher as you prefer), **ODBC Driver 18** for SQL Server, **HammerDB 4.12** (or compatible).
 - A **Scheduled Task** (e.g. `run_hammerdb`) that starts HammerDB at boot/logon so that validation Phase 10 can detect its exit and measure post-benchmark disk utilization.
-- Validation is performed by `check_windows_vm` in `config/scripts/check.sh` -- a 10-phase modular checker driven entirely by `vars.yml`. The relevant phases for this scenario are:
+- Validation is performed by `check_windows_vm` in `config/scripts/check.sh` -- a 12-phase modular checker driven entirely by `vars.yml`. The relevant phases for this scenario are:
   - **Phase 3** -- verifies `MSSQLSERVER` service is `Running` (or whichever service name is set in `validateApps`).
   - **Phase 7** -- initializes blank data DataVolumes (GPT + NTFS) so MSSQL can use them.
   - **Phase 8** -- verifies `dataDisks` non-system disks are present and total size matches `dataDisks x diskSize` (5% tolerance).
   - **Phase 9** -- reports disk utilization before HammerDB finishes; set `expectedDiskUtilGB=0` for report-only mode.
   - **Phase 10** -- polls for the `hammerdb` process/scheduled-task to exit (every 30s, up to `waitProcessTimeout` minutes), then asserts disk utilization is within `diskUtilTolerancePct`% of `expectedDiskUtilAfterProcessGB`.
+  - **Phase 11** -- FIO data generation on extra disks (E:, F:, ...). Gated by `fillExtraDisks=true`. Checks/deploys FIO, generates high-entropy data using `database/hammerdb-mssql/scripts/fio-datagen.ps1`, and validates per-drive dir/file/size counts. See [FIO data generation](#fio-data-generation-on-extra-disks) below.
+  - **Phase 12** -- Aggregate total disk utilization across all non-C: drives (HammerDB on D: + FIO on E:/F:/...). Asserts against `expectedTotalDiskUtilGB` within `diskUtilTolerancePct`.
 
 **`expectedOS` encoding:** The `expectedOS` value in `vars.yml` (e.g. `"Windows Server 2022"`) contains spaces. The `beforeCleanup` template encodes spaces as underscores before passing to the shell (`Windows_Server_2022`), and `check_windows_vm` decodes them back. This means the OS check performs a case-insensitive substring match for `"Windows Server 2022"` against the guest's `Win32_OperatingSystem.Caption`. Do not use literal underscores in `expectedOS` values unless they are part of the actual OS name.
+
+### FIO data generation on extra disks
+
+After HammerDB finishes writing MSSQL data to D:, the remaining data disks (E:, F:, ...) sit empty. Phase 11 fills them with high-entropy data using [FIO](https://github.com/axboe/fio) to create realistic storage utilization that defeats compression/dedup on Ceph-backed PVCs.
+
+#### FIO deployment
+
+FIO is deployed via one of two mechanisms (automatic fallback):
+
+1. **Pre-installed in the golden image** (recommended). Install the [FIO 3.38 Windows MSI](https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi) during image build. The MSI installs to `C:\Program Files\fio\` and adds it to PATH.
+2. **Runtime download** (fallback). If `fio.exe` is not found in PATH, Phase 11 downloads and installs the MSI from the URL in `fioUrl` (default: GitHub releases). Requires outbound HTTPS from the guest. Override `fioUrl` to an internal HTTP server for air-gapped environments.
+
+To pre-install FIO in the image:
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi" -OutFile "$env:TEMP\fio.msi" -UseBasicParsing
+Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\fio.msi", '/qn', '/norestart' -Wait
+```
+
+Or via `virt-customize` on the host:
+
+```bash
+curl -LO https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi
+virt-customize -a winmssql2022.qcow2 --upload fio-3.38-x64.msi:/fio-install.msi \
+  --firstboot-command 'msiexec /i C:\fio-install.msi /qn /norestart'
+```
+
+#### Configuration variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `fillExtraDisks` | `true` | Enable FIO data generation on non-C:/D: drives |
+| `fioUrl` | GitHub releases (3.38) | MSI download URL for runtime install |
+| `dirCount` | `5` | Directories per disk (FIO `numjobs`) |
+| `filesPerDir` | `10` | Files per directory (FIO `nrfiles`) |
+| `fileSize` | `"1G"` | Size of each file (FIO `filesize`) |
+| `depthCount` | `1` | Directory nesting depth |
+| `fioTimeout` | `30` | Maximum minutes for FIO generation |
+| `expectedExtraDiskCapacityGB` | `0` | Expected FIO-written total (0 = report-only) |
+| `expectedTotalDiskUtilGB` | `0` | Expected total across all non-C: drives (0 = report-only) |
+
+Per-disk data = `dirCount x filesPerDir x fileSize`. Example: `5 x 10 x 1G = 50 GB` per extra disk.
+
+#### Idempotency
+
+If `fio_data_dir_*` directories already exist on a drive with the expected count, FIO generation is skipped for that run. This saves time on re-runs or debugging iterations.
 
 ## Building a qcow2 (high level)
 
 1. Install Windows Server 2022 from ISO into a libvirt VM (or OpenShift Virtualization UI), with VirtIO drivers.
-2. Install: Guest Agent, OpenSSH Server, (optional) SQL Server + HammerDB + scheduled task.
+2. Install: Guest Agent, OpenSSH Server, (optional) SQL Server + HammerDB + scheduled task, (optional) FIO 3.38 for data generation on extra disks.
 3. (Optional) For faster cpu-limits validation: copy `C:\Tools\cnv-cpu-burn.ps1` and register the `cnv-cpu-burn` Scheduled Task (see [cpu-limits (Windows)](#cpu-limits-windows) above). This is optional -- the validator bootstraps workers automatically via SSH if they are not already running.
 4. Configure Administrator / policies / firewall as required.
 5. Generalize or seal the image per your process (`sysprep /generalize` if you maintain a generalized golden layer; follow Microsoft licensing for evaluation media).

@@ -12,7 +12,7 @@ vmRunning: true
 cpuCores: 8
 memory: "16Gi"
 rootStorage: "80Gi"
-dataDisks: 1
+dataDisks: 2
 diskSize: "100Gi"
 storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Filesystem"
@@ -47,6 +47,17 @@ validateDiskUtilAfterProcess: true
 waitProcessName: "hammerdb"
 waitProcessTimeout: 30
 expectedDiskUtilAfterProcessGB: 50
+
+# FIO data generation — minimal params to exercise the code path in sanity
+fillExtraDisks: true
+fioUrl: "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi"
+dirCount: 1
+filesPerDir: 2
+fileSize: "100M"
+depthCount: 1
+fioTimeout: 10
+expectedExtraDiskCapacityGB: 0
+expectedTotalDiskUtilGB: 0
 
 esServer: ""
 metadataIndex: "cnv-metadata"

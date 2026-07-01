@@ -97,7 +97,7 @@ nodeSelector: ""
 
 # ─── Validation Configuration ───────────────────────────────────────────────
 # Each toggle enables or disables a phase in check_windows_vm (config/scripts/check.sh).
-# Phases run in order (1–10). Skipped phases always report PASS so they do not
+# Phases run in order (1–12). Skipped phases always report PASS so they do not
 # block the overall result.
 
 # [Phase 2] Verify the guest OS caption contains expectedOS as a substring.
@@ -157,6 +157,44 @@ waitProcessTimeout: 45
 # Observed HammerDB + MSSQL database size on a 3×100Gi disk set ≈ 68GB;
 # 70GB target with 30% tolerance gives a ±21GB acceptance window (49–91GB).
 expectedDiskUtilAfterProcessGB: 70
+
+# ─── FIO Data Generation on Extra Disks (Phase 11) ──────────────────────────
+# After HammerDB completes on D:, generate high-entropy data on all non-C:/D:
+# extra disks using FIO. Defeats storage-level compression/dedup on Ceph-backed
+# PVCs. See docs/windows-image-build.md for FIO deployment details.
+
+# Enable FIO-based data generation on non-C:/D: extra disks after HammerDB completes.
+fillExtraDisks: true
+
+# FIO download URL. Used only when fio.exe is not already installed in the image.
+# Default: GitHub releases (pinned to 3.38). Override to an internal HTTP server
+# for air-gapped environments.
+fioUrl: "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi"
+
+# Directory structure per extra disk:
+#   Each disk gets dirCount directories, each containing filesPerDir files of
+#   fileSize each. Per-disk total = dirCount × filesPerDir × fileSize.
+#   Example: 5 × 10 × 1G = 50 GB per disk.
+dirCount: 5
+filesPerDir: 10
+fileSize: "1G"
+
+# Directory depth for FIO filename_format tree. 1 = flat dirs.
+depthCount: 1
+
+# Maximum time (minutes) to wait for FIO data generation to complete.
+# Increase for large disks or slow storage backends.
+fioTimeout: 30
+
+# [Phase 11] Expected FIO-written capacity (GB) across ALL extra disks.
+# 0 = report-only mode (logs utilization without asserting).
+expectedExtraDiskCapacityGB: 0
+
+# [Phase 12] Expected TOTAL disk utilization (GB) across ALL non-C: drives after
+# both HammerDB (D:) and FIO (E:, F:, …) complete.
+# Asserts measured total is within diskUtilTolerancePct of this value.
+# 0 = report-only (logs total without asserting).
+expectedTotalDiskUtilGB: 0
 
 # ─── Observability ──────────────────────────────────────────────────────────
 

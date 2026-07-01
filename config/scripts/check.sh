@@ -1671,6 +1671,15 @@ check_windows_vm() {
     local wait_process_name="${cfg[waitProcessName]:-}"
     local wait_process_timeout="${cfg[waitProcessTimeout]:-45}"
     local expected_disk_util_after_gb="${cfg[expectedDiskUtilAfterProcessGB]:-0}"
+    local fill_extra_disks="${cfg[fillExtraDisks]:-false}"
+    local fio_url="${cfg[fioUrl]:-https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi}"
+    local dir_count="${cfg[dirCount]:-5}"
+    local files_per_dir="${cfg[filesPerDir]:-10}"
+    local file_size="${cfg[fileSize]:-1G}"
+    local depth_count="${cfg[depthCount]:-1}"
+    local fio_timeout="${cfg[fioTimeout]:-30}"
+    local expected_extra_disk_capacity_gb="${cfg[expectedExtraDiskCapacityGB]:-0}"
+    local expected_total_disk_util_gb="${cfg[expectedTotalDiskUtilGB]:-0}"
 
     echo "=============================================="
     echo "  Windows VM Validation (check_windows_vm)"
@@ -1729,7 +1738,7 @@ check_windows_vm() {
         # Phase 1: SSH check
         # ──────────────────────────────────────
         if [ "${validate_ssh}" = "true" ]; then
-            echo "  [1/10] SSH check..."
+            echo "  [1/12] SSH check..."
             local ssh_test
             ssh_test=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "echo SSH_OK" 2>&1) || true
             if echo "${ssh_test}" | grep -q "SSH_OK"; then
@@ -1745,7 +1754,7 @@ check_windows_vm() {
                 continue
             fi
         else
-            echo "  [1/10] SSH check... SKIP"
+            echo "  [1/12] SSH check... SKIP"
             validations+=("{\"phase\": \"ssh_check\", \"status\": \"SKIP\", \"message\": \"validateSSH=false\"}")
         fi
 
@@ -1759,7 +1768,7 @@ check_windows_vm() {
         # Phase 2: OS check
         # ──────────────────────────────────────
         if [ "${validate_os}" = "true" ]; then
-            echo "  [2/10] OS check..."
+            echo "  [2/12] OS check..."
             local guest_os_name
             guest_os_name=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_os_name_cmd}" 2>/dev/null || echo "")
             guest_os_name=$(echo "${guest_os_name}" | tr -d '\r' | head -1 | xargs)
@@ -1774,7 +1783,7 @@ check_windows_vm() {
                 overall_status="FAILED"
             fi
         else
-            echo "  [2/10] OS check... SKIP"
+            echo "  [2/12] OS check... SKIP"
             validations+=("{\"phase\": \"os_check\", \"status\": \"SKIP\", \"message\": \"validateOS=false\"}")
         fi
 
@@ -1782,7 +1791,7 @@ check_windows_vm() {
         # Phase 3: App check (services)
         # ──────────────────────────────────────
         if [ -n "${validate_apps}" ]; then
-            echo "  [3/10] App check (services: ${validate_apps})..."
+            echo "  [3/12] App check (services: ${validate_apps})..."
             IFS=',' read -ra app_list <<< "${validate_apps}"
             for svc in "${app_list[@]}"; do
                 svc=$(echo "${svc}" | xargs)
@@ -1804,7 +1813,7 @@ check_windows_vm() {
                 fi
             done
         else
-            echo "  [3/10] App check... SKIP (no services specified)"
+            echo "  [3/12] App check... SKIP (no services specified)"
             validations+=("{\"phase\": \"app_check\", \"status\": \"SKIP\", \"message\": \"validateApps is empty\"}")
         fi
 
@@ -1812,7 +1821,7 @@ check_windows_vm() {
         # Phase 4: CPU check
         # ──────────────────────────────────────
         if [ "${validate_cpu}" = "true" ] && [ "${expected_cpu}" != "0" ]; then
-            echo "  [4/10] CPU check (expected: ${expected_cpu})..."
+            echo "  [4/12] CPU check (expected: ${expected_cpu})..."
             local guest_cpus
             guest_cpus=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_cpu_count_cmd}" 2>/dev/null || echo "0")
             guest_cpus=$(echo "${guest_cpus}" | head -1 | tr -cd '0-9')
@@ -1828,7 +1837,7 @@ check_windows_vm() {
                 overall_status="FAILED"
             fi
         else
-            echo "  [4/10] CPU check... SKIP"
+            echo "  [4/12] CPU check... SKIP"
             validations+=("{\"phase\": \"cpu_check\", \"status\": \"SKIP\", \"message\": \"validateCPU=false or cpuCores=0\"}")
         fi
 
@@ -1836,7 +1845,7 @@ check_windows_vm() {
         # Phase 5: Memory check
         # ──────────────────────────────────────
         if [ "${validate_memory}" = "true" ] && [ "${expected_memory}" != "0" ]; then
-            echo "  [5/10] Memory check (expected: ${expected_memory})..."
+            echo "  [5/12] Memory check (expected: ${expected_memory})..."
             # Convert expected_memory (e.g. "16Gi") to MB
             local expected_mb
             expected_mb=$(echo "${expected_memory}" | sed 's/Gi$//' | sed 's/G$//')
@@ -1863,7 +1872,7 @@ check_windows_vm() {
                 overall_status="FAILED"
             fi
         else
-            echo "  [5/10] Memory check... SKIP"
+            echo "  [5/12] Memory check... SKIP"
             validations+=("{\"phase\": \"memory_check\", \"status\": \"SKIP\", \"message\": \"validateMemory=false or memory=0\"}")
         fi
 
@@ -1871,7 +1880,7 @@ check_windows_vm() {
         # Phase 6: NIC check (validate-only)
         # ──────────────────────────────────────
         if [ "${validate_nics}" = "true" ]; then
-            echo "  [6/10] NIC check (expected: ${expected_nics})..."
+            echo "  [6/12] NIC check (expected: ${expected_nics})..."
             local guest_nics
             guest_nics=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_nic_count_cmd}" 2>/dev/null || echo "0")
             guest_nics=$(echo "${guest_nics}" | head -1 | tr -cd '0-9')
@@ -1887,7 +1896,7 @@ check_windows_vm() {
                 overall_status="FAILED"
             fi
         else
-            echo "  [6/10] NIC check... SKIP"
+            echo "  [6/12] NIC check... SKIP"
             validations+=("{\"phase\": \"nic_check\", \"status\": \"SKIP\", \"message\": \"validateNICs=false\"}")
         fi
 
@@ -1895,7 +1904,7 @@ check_windows_vm() {
         # Phase 7: Disk initialization (action phase)
         # ──────────────────────────────────────
         if [ "${initialize_disks}" = "true" ]; then
-            echo "  [7/10] Disk initialization (bring offline disks online, GPT, NTFS)..."
+            echo "  [7/12] Disk initialization (bring offline disks online, GPT, NTFS)..."
             local init_output
             init_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_init_cmd}" 2>/dev/null || echo "INIT_ERROR")
 
@@ -1916,7 +1925,7 @@ check_windows_vm() {
                 disk_init_ok="true"
             fi
         else
-            echo "  [7/10] Disk initialization... SKIP"
+            echo "  [7/12] Disk initialization... SKIP"
             validations+=("{\"phase\": \"disk_init\", \"status\": \"SKIP\", \"message\": \"initializeDisks=false\"}")
             # If user skips init, assume disks are already ready
             disk_init_ok="true"
@@ -1927,10 +1936,10 @@ check_windows_vm() {
         # ──────────────────────────────────────
         if [ "${validate_disks}" = "true" ]; then
             if [ "${disk_init_ok}" != "true" ]; then
-                echo "  [8/10] Disk check... SKIP (disk init failed)"
+                echo "  [8/12] Disk check... SKIP (disk init failed)"
                 validations+=("{\"phase\": \"disk_check\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
             else
-                echo "  [8/10] Disk check (expected: ${expected_data_disks} disk(s), ${expected_disk_size} each)..."
+                echo "  [8/12] Disk check (expected: ${expected_data_disks} disk(s), ${expected_disk_size} each)..."
                 local disk_info_json
                 disk_info_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_data_disk_info_cmd}" 2>/dev/null || echo "{}")
 
@@ -1973,7 +1982,7 @@ check_windows_vm() {
                 fi
             fi
         else
-            echo "  [8/10] Disk check... SKIP"
+            echo "  [8/12] Disk check... SKIP"
             validations+=("{\"phase\": \"disk_check\", \"status\": \"SKIP\", \"message\": \"validateDisks=false\"}")
         fi
 
@@ -1982,7 +1991,7 @@ check_windows_vm() {
         # ──────────────────────────────────────
         if [ "${validate_disk_util}" = "true" ]; then
             if [ "${disk_init_ok}" != "true" ]; then
-                echo "  [9/10] Disk utilization check... SKIP (disk init failed)"
+                echo "  [9/12] Disk utilization check... SKIP (disk init failed)"
                 validations+=("{\"phase\": \"disk_util\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
             else
                 local util_json
@@ -1995,18 +2004,18 @@ check_windows_vm() {
                 # An empty or malformed JSON response (e.g. SSH/PowerShell failure) must not
                 # silently pass as "0 GB used" — that is indistinguishable from a real measurement.
                 if ! echo "${util_json}" | grep -q '"usedGB"'; then
-                    echo "  [9/10] Disk utilization check... FAIL (command returned no data)"
+                    echo "  [9/12] Disk utilization check... FAIL (command returned no data)"
                     log_validation_checkpoint "disk_util" "FAIL" "disk_util command returned no usedGB field"
                     validations+=("{\"phase\": \"disk_util\", \"status\": \"FAIL\", \"message\": \"disk_util command returned no data (SSH or PowerShell failure)\"}")
                     overall_status="FAILED"
                 elif [ "${expected_disk_util_gb}" -eq 0 ]; then
                     # 0 = report-only; no assertion is made. Set a non-zero value to enforce a target.
-                    echo "  [9/10] Disk utilization check (reporting only — expectedDiskUtilGB=0)..."
+                    echo "  [9/12] Disk utilization check (reporting only — expectedDiskUtilGB=0)..."
                     echo "    PASS: Disk utilization is ${guest_used_gb}GB (no target set, reporting only)"
                     log_validation_checkpoint "disk_util" "PASS" "Used ${guest_used_gb}GB (report-only)"
                     validations+=("{\"phase\": \"disk_util\", \"status\": \"PASS\", \"message\": \"Used: ${guest_used_gb}GB (expectedDiskUtilGB=0, report-only)\"}")
                 else
-                    echo "  [9/10] Disk utilization check (expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)..."
+                    echo "  [9/12] Disk utilization check (expected: ~${expected_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)..."
                     local util_tolerance=$((expected_disk_util_gb * disk_util_tolerance_pct / 100))
                     [ "${util_tolerance}" -lt 5 ] && util_tolerance=5
                     local util_diff=$((expected_disk_util_gb - guest_used_gb))
@@ -2025,7 +2034,7 @@ check_windows_vm() {
                 fi
             fi
         else
-            echo "  [9/10] Disk utilization check... SKIP"
+            echo "  [9/12] Disk utilization check... SKIP"
             validations+=("{\"phase\": \"disk_util\", \"status\": \"SKIP\", \"message\": \"validateDiskUtil=false\"}")
         fi
 
@@ -2034,13 +2043,13 @@ check_windows_vm() {
         # ──────────────────────────────────────
         if [ "${validate_disk_util_after}" = "true" ]; then
             if [ "${disk_init_ok}" != "true" ]; then
-                echo "  [10/10] Post-process disk utilization... SKIP (disk init failed)"
+                echo "  [10/12] Post-process disk utilization... SKIP (disk init failed)"
                 validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
             elif [ -z "${wait_process_name}" ]; then
-                echo "  [10/10] Post-process disk utilization... SKIP (no waitProcessName specified)"
+                echo "  [10/12] Post-process disk utilization... SKIP (no waitProcessName specified)"
                 validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"SKIP\", \"message\": \"waitProcessName is empty\"}")
             else
-                echo "  [10/10] Post-process disk utilization (waiting for '${wait_process_name}' to finish, timeout ${wait_process_timeout}m)..."
+                echo "  [10/12] Post-process disk utilization (waiting for '${wait_process_name}' to finish, timeout ${wait_process_timeout}m)..."
                 local max_polls=$((wait_process_timeout * 2))
                 local poll
                 local process_done="false"
@@ -2102,8 +2111,256 @@ check_windows_vm() {
                 fi
             fi
         else
-            echo "  [10/10] Post-process disk utilization... SKIP"
+            echo "  [10/12] Post-process disk utilization... SKIP"
             validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"SKIP\", \"message\": \"validateDiskUtilAfterProcess=false\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 11: FIO data generation on extra disks
+        # ──────────────────────────────────────
+        if [ "${fill_extra_disks}" = "true" ]; then
+            if [ "${disk_init_ok}" != "true" ]; then
+                echo "  [11/12] FIO data generation... SKIP (disk init failed)"
+                validations+=("{\"phase\": \"fio_datagen\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
+            elif [ "${ssh_ok}" != "true" ]; then
+                echo "  [11/12] FIO data generation... SKIP (no SSH)"
+                validations+=("{\"phase\": \"fio_datagen\", \"status\": \"SKIP\", \"message\": \"Skipped — SSH not available\"}")
+            else
+                echo "  [11/12] FIO data generation on extra disks..."
+                local fio_phase_failed="false"
+
+                    # Sub-phase a: FIO pre-flight (check/install)
+                    echo "    [11a] FIO pre-flight check/install..."
+                    # shellcheck disable=SC2016
+                    local ps_preflight
+                    ps_preflight='$f=Get-Command fio.exe -EA SilentlyContinue; '
+                    ps_preflight+='if($f){$v=& fio.exe --version 2>&1; "FIO_FOUND=$($f.Source) version=$v"; exit 0} '
+                    ps_preflight+='Write-Output "FIO_NOT_FOUND - deploying"; '
+                    ps_preflight+='[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; '
+                    ps_preflight+='$i="$env:TEMP\fio.msi"; '
+                    ps_preflight+="Invoke-WebRequest -Uri '${fio_url}' -OutFile \$i -UseBasicParsing -TimeoutSec 120; "
+                    ps_preflight+='$p=Start-Process msiexec.exe -ArgumentList "/i `"$i`" /qn /norestart" -Wait -PassThru -NoNewWindow; '
+                    ps_preflight+='if($p.ExitCode -ne 0){"FIO_DEPLOY_FAILED msiexec=$($p.ExitCode)"; exit 1} '
+                    ps_preflight+='$env:PATH+=";C:\Program Files\fio"; '
+                    ps_preflight+='$f=Get-Command fio.exe -EA SilentlyContinue; '
+                    ps_preflight+='if($f){$v=& fio.exe --version 2>&1; "FIO_DEPLOYED=$($f.Source) version=$v"; exit 0} '
+                    ps_preflight+='"FIO_DEPLOY_FAILED not in PATH"; exit 1'
+                    local encoded_preflight
+                    encoded_preflight=$(printf '%s' "${ps_preflight}" | iconv -t UTF-16LE | base64 -w 0)
+
+                    local preflight_output
+                    preflight_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                        "powershell.exe -NoProfile -EncodedCommand ${encoded_preflight}" 2>&1) || true
+                    echo "    ${preflight_output}"
+
+                    if echo "${preflight_output}" | grep -qE "FIO_FOUND|FIO_DEPLOYED"; then
+                        echo "    FIO is available"
+                    else
+                        echo "    FAIL: FIO pre-flight failed"
+                        log_validation_checkpoint "fio_datagen" "FAIL" "FIO pre-flight failed: ${preflight_output}"
+                        validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"FIO pre-flight failed\"}")
+                        overall_status="FAILED"
+                        fio_phase_failed="true"
+                    fi
+
+                    # Sub-phase b: FIO data generation
+                    if [ "${fio_phase_failed}" != "true" ]; then
+                        echo "    [11b] Running FIO data generation (timeout: ${fio_timeout}m)..."
+
+                        # shellcheck disable=SC2016
+                        # FIO 3.38 on Windows has a bug where the directory= option
+                        # fails with lstat errors. Workaround: Set-Location to each
+                        # drive root and run FIO without directory= per drive.
+                        local ps_generate
+                        ps_generate='$ErrorActionPreference="Stop"; '
+                        ps_generate+='$ex=@("C","D"); '
+                        ps_generate+='$vols=Get-Volume|Where-Object{$_.DriveLetter -and $_.DriveType -eq "Fixed" -and $_.DriveLetter -notin $ex}; '
+                        ps_generate+='if($vols.Count -eq 0){"DATAGEN_NO_TARGET_DRIVES"; exit 1} '
+                        ps_generate+='$allExist=$true; foreach($v in $vols){$e=@(Get-ChildItem -Path "$($v.DriveLetter):\" -Directory -Filter "fio_data_dir_*" -EA SilentlyContinue); '
+                        ps_generate+="if(\$e.Count -ne ${dir_count}){\$allExist=\$false; break}} "
+                        ps_generate+='if($allExist){"DATAGEN_SKIPPED data already exists"; exit 0} '
+                        ps_generate+='"DATAGEN_STARTING drives=$(($vols.DriveLetter)-join ",")"; '
+                        ps_generate+='$d=[char]36; '
+                        if [ "${depth_count}" -le 1 ]; then
+                            ps_generate+='$fn="fio_data_dir_${d}jobnum\bench_file_${d}filenum.dat"; '
+                        else
+                            local depth_expr='$fn='
+                            for ((dd = 0; dd < depth_count; dd++)); do
+                                [ "${dd}" -gt 0 ] && depth_expr+='"\"+'
+                                depth_expr+='"fio_data_dir_${d}jobnum'
+                            done
+                            depth_expr+='\bench_file_${d}filenum.dat"; '
+                            ps_generate+="${depth_expr}"
+                        fi
+                        ps_generate+='$fio=(Get-Command fio.exe -EA SilentlyContinue).Source; if(-not $fio){$fio="C:\Program Files\fio\fio.exe"} '
+                        ps_generate+='$sw=[System.Diagnostics.Stopwatch]::StartNew(); $anyFail=$false; '
+                        ps_generate+='foreach($v in $vols){ '
+                        ps_generate+='Set-Location "$($v.DriveLetter):\"; '
+                        ps_generate+='$j="$env:TEMP\cnv_fio_$($v.DriveLetter).fio"; '
+                        ps_generate+='$nl=[Environment]::NewLine; '
+                        ps_generate+='$cfg="[global]"+$nl+"rw=write"+$nl+"bs=1M"+$nl+"refill_buffers"+$nl+"scramble_buffers=1"+$nl+'
+                        ps_generate+="\"numjobs=${dir_count}\"+\$nl+\"nrfiles=${files_per_dir}\"+\$nl+\"filesize=${file_size}\"+\$nl+"
+                        ps_generate+='"filename_format=$fn"+$nl+$nl+"[fill_$($v.DriveLetter)]"; '
+                        ps_generate+='Set-Content -Path $j -Value $cfg -Encoding ascii; '
+                        ps_generate+='& $fio $j 2>&1 | ForEach-Object{Write-Output $_}; '
+                        ps_generate+='if($LASTEXITCODE -ne 0){$anyFail=$true; "DATAGEN_DRIVE_FAILED drive=$($v.DriveLetter) exit=$LASTEXITCODE"} '
+                        ps_generate+='Remove-Item $j -Force -EA SilentlyContinue } '
+                        ps_generate+='$sw.Stop(); '
+                        ps_generate+='if($anyFail){"DATAGEN_FIO_FAILED elapsed=$([math]::Round($sw.Elapsed.TotalSeconds))s"; exit 1} '
+                        ps_generate+='"DATAGEN_COMPLETE elapsed=$([math]::Round($sw.Elapsed.TotalSeconds))s"'
+                        local encoded_generate
+                        encoded_generate=$(printf '%s' "${ps_generate}" | iconv -t UTF-16LE | base64 -w 0)
+
+                        local generate_output
+                        generate_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                            "powershell.exe -NoProfile -EncodedCommand ${encoded_generate}" 2>&1) || true
+
+                        local gen_summary
+                        gen_summary=$(echo "${generate_output}" | grep -E "DATAGEN_" | tail -5)
+                        echo "    ${gen_summary}"
+
+                        if echo "${generate_output}" | grep -qE "DATAGEN_COMPLETE|DATAGEN_SKIPPED"; then
+                            echo "    FIO data generation completed"
+                        elif echo "${generate_output}" | grep -q "DATAGEN_FIO_FAILED"; then
+                            echo "    FAIL: FIO execution failed"
+                            log_validation_checkpoint "fio_datagen" "FAIL" "FIO execution failed"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"FIO execution failed\"}")
+                            overall_status="FAILED"
+                            fio_phase_failed="true"
+                        elif echo "${generate_output}" | grep -q "DATAGEN_NO_TARGET_DRIVES"; then
+                            echo "    FAIL: No target drives found for FIO (only C: and D: present?)"
+                            log_validation_checkpoint "fio_datagen" "FAIL" "No target drives for FIO"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"No extra drives found (need dataDisks > 2)\"}")
+                            overall_status="FAILED"
+                            fio_phase_failed="true"
+                        else
+                            echo "    FAIL: FIO data generation timed out or returned unexpected output"
+                            log_validation_checkpoint "fio_datagen" "FAIL" "FIO datagen timeout or unexpected output"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"FIO data generation timed out after ${fio_timeout}m or returned unexpected output\"}")
+                            overall_status="FAILED"
+                            fio_phase_failed="true"
+                        fi
+                    fi
+
+                    # Sub-phase c: Per-drive validation
+                    if [ "${fio_phase_failed}" != "true" ]; then
+                        echo "    [11c] Validating FIO-generated data per drive..."
+                        # shellcheck disable=SC2016
+                        local ps_validate
+                        ps_validate='$ex=@("C","D"); '
+                        ps_validate+='$vols=Get-Volume|Where-Object{$_.DriveLetter -and $_.DriveType -eq "Fixed" -and $_.DriveLetter -notin $ex}; '
+                        ps_validate+='if($vols.Count -eq 0){"DATAGEN_NO_TARGET_DRIVES"; exit 1} '
+                        ps_validate+='foreach($v in $vols){$r="$($v.DriveLetter):\"; '
+                        ps_validate+='$gd=@(Get-ChildItem -Path $r -Directory -Filter "fio_data_dir_*" -EA SilentlyContinue); '
+                        ps_validate+='$tf=0;$tb=[long]0; foreach($d in $gd){$fs=@(Get-ChildItem -Path $d.FullName -File -Filter "bench_file_*" -Recurse -EA SilentlyContinue); $tf+=$fs.Count; foreach($f in $fs){$tb+=$f.Length}} '
+                        ps_validate+='$gb=[math]::Round($tb/1GB,2); '
+                        ps_validate+="\"DATAGEN_RESULT:drive=\$(\$v.DriveLetter):dirs=\$(\$gd.Count)/${dir_count}:files=\$tf/$((dir_count * files_per_dir)):usedGB=\${gb}:status=\$(if(\$gd.Count -eq ${dir_count} -and \$tf -eq $((dir_count * files_per_dir))){'PASS'}else{'FAIL'})\"}"
+                        local encoded_validate
+                        encoded_validate=$(printf '%s' "${ps_validate}" | iconv -t UTF-16LE | base64 -w 0)
+
+                        local validate_output
+                        validate_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                            "powershell.exe -NoProfile -EncodedCommand ${encoded_validate}" 2>&1) || true
+
+                        local all_drives_pass="true"
+                        local datagen_details=""
+                        while IFS= read -r line; do
+                            if [[ "${line}" == DATAGEN_RESULT:* ]]; then
+                                echo "    ${line}"
+                                datagen_details+="${line} "
+                                if [[ "${line}" == *"status=FAIL"* ]]; then
+                                    all_drives_pass="false"
+                                fi
+                            fi
+                        done <<< "${validate_output}"
+
+                        if [ "${all_drives_pass}" = "true" ] && [ -n "${datagen_details}" ]; then
+                            echo "    PASS: All extra drives validated"
+                            log_validation_checkpoint "fio_datagen" "PASS" "All drives passed validation"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"PASS\", \"message\": \"${datagen_details}\"}")
+                        elif [ -z "${datagen_details}" ]; then
+                            echo "    FAIL: No DATAGEN_RESULT lines returned from validation"
+                            log_validation_checkpoint "fio_datagen" "FAIL" "No validation results returned"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"No DATAGEN_RESULT lines returned\"}")
+                            overall_status="FAILED"
+                        else
+                            echo "    FAIL: One or more drives failed validation"
+                            log_validation_checkpoint "fio_datagen" "FAIL" "Drive validation failure"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"${datagen_details}\"}")
+                            overall_status="FAILED"
+                        fi
+
+                        # Sub-phase d: FIO-only aggregate check
+                        if [ "${expected_extra_disk_capacity_gb}" -gt 0 ]; then
+                            local fio_total_gb=0
+                            while IFS= read -r line; do
+                                if [[ "${line}" == DATAGEN_RESULT:* ]]; then
+                                    local drive_gb
+                                    drive_gb=$(echo "${line}" | grep -oP 'usedGB=\K[0-9.]+' || echo "0")
+                                    fio_total_gb=$(echo "${fio_total_gb} + ${drive_gb}" | bc)
+                                fi
+                            done <<< "${validate_output}"
+                            local fio_total_gb_int
+                            fio_total_gb_int=$(printf '%.0f' "${fio_total_gb}")
+                            local extra_tolerance=$((expected_extra_disk_capacity_gb * disk_util_tolerance_pct / 100))
+                            [ "${extra_tolerance}" -lt 5 ] && extra_tolerance=5
+                            local extra_diff=$((expected_extra_disk_capacity_gb - fio_total_gb_int))
+                            [ "${extra_diff}" -lt 0 ] && extra_diff=$((-extra_diff))
+                            if [ "${extra_diff}" -le "${extra_tolerance}" ]; then
+                                echo "    PASS: FIO total ${fio_total_gb_int}GB (expected ~${expected_extra_disk_capacity_gb}GB +/-${disk_util_tolerance_pct}%)"
+                            else
+                                echo "    FAIL: FIO total ${fio_total_gb_int}GB (expected ~${expected_extra_disk_capacity_gb}GB +/-${disk_util_tolerance_pct}%)"
+                                overall_status="FAILED"
+                            fi
+                        fi
+                    fi
+            fi
+        else
+            echo "  [11/12] FIO data generation... SKIP"
+            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"SKIP\", \"message\": \"fillExtraDisks=false\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 12: Aggregate total disk utilization
+        # ──────────────────────────────────────
+        if [ "${fill_extra_disks}" = "true" ] && [ "${disk_init_ok}" = "true" ] && [ "${ssh_ok}" = "true" ]; then
+            echo "  [12/12] Aggregate total disk utilization (all non-C: drives)..."
+            local total_util_json
+            total_util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
+            local total_used_gb
+            total_used_gb=$(echo "${total_util_json}" | grep -oP '"usedGB"\s*:\s*\K[0-9]+' || echo "0")
+            total_used_gb=${total_used_gb:-0}
+
+            if ! echo "${total_util_json}" | grep -q '"usedGB"'; then
+                echo "    FAIL: Aggregate disk util command returned no data"
+                log_validation_checkpoint "total_disk_util" "FAIL" "disk_util command returned no usedGB"
+                validations+=("{\"phase\": \"total_disk_util\", \"status\": \"FAIL\", \"message\": \"Aggregate disk_util command returned no data\"}")
+                overall_status="FAILED"
+            elif [ "${expected_total_disk_util_gb}" -eq 0 ]; then
+                echo "    PASS: Total disk utilization is ${total_used_gb}GB (no target set, reporting only)"
+                log_validation_checkpoint "total_disk_util" "PASS" "Total ${total_used_gb}GB (report-only)"
+                validations+=("{\"phase\": \"total_disk_util\", \"status\": \"PASS\", \"message\": \"Total: ${total_used_gb}GB (expectedTotalDiskUtilGB=0, report-only)\"}")
+            else
+                echo "    Aggregate total disk utilization (expected: ~${expected_total_disk_util_gb}GB +/-${disk_util_tolerance_pct}%)..."
+                local total_tolerance=$((expected_total_disk_util_gb * disk_util_tolerance_pct / 100))
+                [ "${total_tolerance}" -lt 5 ] && total_tolerance=5
+                local total_diff=$((expected_total_disk_util_gb - total_used_gb))
+                [ "${total_diff}" -lt 0 ] && total_diff=$((-total_diff))
+
+                if [ "${total_diff}" -le "${total_tolerance}" ]; then
+                    echo "    PASS: Total disk utilization ${total_used_gb}GB (expected ~${expected_total_disk_util_gb}GB +/-${disk_util_tolerance_pct}%, tolerance=${total_tolerance}GB)"
+                    log_validation_checkpoint "total_disk_util" "PASS" "Total ${total_used_gb}GB"
+                    validations+=("{\"phase\": \"total_disk_util\", \"status\": \"PASS\", \"message\": \"Total: ${total_used_gb}GB, Expected: ~${expected_total_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                else
+                    echo "    FAIL: Total disk utilization ${total_used_gb}GB (expected ~${expected_total_disk_util_gb}GB +/-${disk_util_tolerance_pct}%, tolerance=${total_tolerance}GB)"
+                    log_validation_checkpoint "total_disk_util" "FAIL" "Total ${total_used_gb}GB vs expected ${expected_total_disk_util_gb}GB"
+                    validations+=("{\"phase\": \"total_disk_util\", \"status\": \"FAIL\", \"message\": \"Total: ${total_used_gb}GB, Expected: ~${expected_total_disk_util_gb}GB +/-${disk_util_tolerance_pct}%\"}")
+                    overall_status="FAILED"
+                fi
+            fi
+        else
+            echo "  [12/12] Aggregate total disk utilization... SKIP"
+            validations+=("{\"phase\": \"total_disk_util\", \"status\": \"SKIP\", \"message\": \"fillExtraDisks=false or prerequisites not met\"}")
         fi
     done
 
