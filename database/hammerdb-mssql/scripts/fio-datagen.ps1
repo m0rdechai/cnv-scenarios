@@ -1,20 +1,20 @@
 # FIO-based data generator for CNV extra disks.
-# Single source of truth: check.sh reads this file, substitutes __PLACEHOLDER__
-# tokens via sed, base64-encodes (UTF-16LE), and sends via remote_command.
+# Standalone reference script. check.sh uses equivalent inline PowerShell
+# snippets at runtime (EncodedCommand). Run this script manually for debugging.
 #
-# Modes (selected by check.sh via $Mode substitution):
+# Modes:
 #   preflight  - Check/install FIO; exit 0 if ready, 1 if failed
 #   generate   - Build FIO job file, run FIO on target drives
 #   validate   - Audit generated data per drive, emit DATAGEN_RESULT lines
 #
-# Placeholders replaced by check.sh at runtime:
-#   __MODE__              preflight | generate | validate
-#   __DIR_COUNT__         numjobs (directories per disk)
-#   __FILES_PER_DIR__     nrfiles (files per directory)
-#   __FILE_SIZE__         filesize (e.g. 1G, 100M)
-#   __DEPTH_COUNT__       directory nesting depth
-#   __FIO_URL__           MSI download URL for runtime install
-#   __EXCLUDE_DRIVES__    Comma-separated drive letters to skip (e.g. C,D)
+# Parameters (set below or override before running):
+#   $Mode             preflight | generate | validate
+#   $DirectoryCount   numjobs (directories per disk)
+#   $FilesPerDir      nrfiles (files per directory)
+#   $FileSize         filesize (e.g. 1G, 100M)
+#   $DepthCount       directory nesting depth
+#   $FioUrl           MSI download URL for runtime install
+#   $ExcludeDrives    Array of drive letters to skip (e.g. C,D)
 
 $ErrorActionPreference = 'Stop'
 

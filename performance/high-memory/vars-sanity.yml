@@ -15,7 +15,7 @@ vmName: "high-memory-vm"
 cpuCores: 1
 
 # Memory Configuration (minimal high memory for sanity)
-highMemory: "1Gi"
+highMemory: "2Gi"
 
 # Storage Configuration (minimal)
 storage: "10Gi"

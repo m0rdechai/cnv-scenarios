@@ -11,7 +11,7 @@ runTimestamp: "run-default"  # Will be set by run-sanity-tests.sh
 vmCount: 1
 
 # Memory Configuration (minimal)
-memorySize: "512Mi"
+memorySize: "2Gi"
 
 # Resource Configuration (minimal)
 cpuCores: 1

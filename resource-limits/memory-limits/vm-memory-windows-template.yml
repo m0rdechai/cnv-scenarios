@@ -84,11 +84,8 @@ spec:
         resources:
           requests:
             memory: {{.memory}}
-          {{- $memoryBytes := .memory | regexReplaceAll "[^0-9]" "" | int }}
-          {{- if gt $memoryBytes 100 }}
           limits:
             memory: {{.memory}}
-          {{- end }}
       networks:
       - name: default
         pod: {}

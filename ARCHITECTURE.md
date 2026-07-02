@@ -291,7 +291,7 @@ LONG_WAIT=30         # Seconds between later retries
 | `check_large_disk` | Validates large disk visibility (4 phases) | label_key, label_value, namespace, disk_size, private_key, vm_user, results_dir |
 | `check_high_memory` | Validates high memory allocation with tolerance | label_key, label_value, namespace, memory_size, private_key, vm_user, results_dir |
 | `check_performance_metrics` | Validates CirrOS VMs (password-based SSH) | label_key, label_value, namespace, vm_password, vm_user, results_dir |
-| `check_windows_vm` | 11-phase Windows VM validation via `virtctl ssh` + PowerShell | label_key, label_value, namespace, private_key, vm_user, [key=value …], results_dir |
+| `check_windows_vm` | 12-phase Windows VM validation via `virtctl ssh` + PowerShell | label_key, label_value, namespace, private_key, vm_user, [key=value …], results_dir |
 
 **Validation Flow Example (check_memory_limits):**
 ```
@@ -302,25 +302,27 @@ Phase 4/4: Check memory workload -- stress-ng processes (Linux, 0 = FAIL) or boo
            4 CNV_MEM_BURN=1 workers and verify count + free memory pressure (Windows)
 ```
 
-**Validation Flow: `check_windows_vm` (11 phases)**
+**Validation Flow: `check_windows_vm` (12 phases + vm_discovery)**
 
 `check_windows_vm` uses a `key=value` argument pattern rather than positional parameters so that new phases can be added without breaking existing callers. All phases after the five fixed positional args (`label_key`, `label_value`, `namespace`, `private_key`, `vm_user`) are parsed from `key=value` pairs; the last argument is always `results_dir`.
 
 ```
-Phase 1:  vm_discovery        — VMs exist with label selector
-Phase 2:  SSH check           — echo SSH_OK over virtctl ssh; gates all subsequent phases
-Phase 3:  OS check            — Win32_OperatingSystem.Caption contains expectedOS (case-insensitive)
-Phase 4:  App check           — each service in validateApps (comma-separated) is Running
-Phase 5:  CPU check           — logical CPU count == cpuCores (exact)
-Phase 6:  Memory check        — TotalPhysicalMemory within 5% of memory
-Phase 7:  NIC check           — count of Up NICs with IPv4 == expectedNICs (exact)
-Phase 8:  Disk init (action)  — bring offline/RAW disks online, GPT-partition, NTFS-format; idempotent
-Phase 9:  Disk count/size     — non-system disk count == dataDisks; total size within 5% of dataDisks×diskSize
-Phase 10: Disk utilization    — used space on non-C: volumes; asserts vs expectedDiskUtilGB (0 = report-only)
-Phase 11: Post-process util   — polls for waitProcessName exit; asserts disk util vs expectedDiskUtilAfterProcessGB
+Pre-loop: vm_discovery        — VMs exist with label selector
+Phase 1:  SSH check           — echo SSH_OK over virtctl ssh; gates all subsequent phases
+Phase 2:  OS check            — Win32_OperatingSystem.Caption contains expectedOS (case-insensitive)
+Phase 3:  App check           — each service in validateApps (comma-separated) is Running
+Phase 4:  CPU check           — logical CPU count == cpuCores (exact)
+Phase 5:  Memory check        — TotalPhysicalMemory within 5% of memory
+Phase 6:  NIC check           — count of Up NICs with IPv4 == expectedNICs (exact)
+Phase 7:  Disk init (action)  — bring offline/RAW disks online, GPT-partition, NTFS-format; idempotent
+Phase 8:  Disk count/size     — non-system disk count == dataDisks; total size within 5% of dataDisks×diskSize
+Phase 9:  Disk utilization    — used space on non-C: volumes; asserts vs expectedDiskUtilGB (0 = report-only)
+Phase 10: Post-process util   — polls for waitProcessName exit; asserts disk util vs expectedDiskUtilAfterProcessGB
+Phase 11: FIO data gen        — fills extra disks with high-entropy data via FIO; validates per-drive counts/sizes
+Phase 12: Aggregate disk util — total used space across all non-C: drives; asserts vs expectedTotalDiskUtilGB
 ```
 
-Phases 9, 10, and 11 are gated on Phase 8 (`disk_init_ok` flag). A failed or skipped Phase 8 causes all three downstream phases to report `SKIP` and does not set `overall_status = FAILED`.
+Phases 8–10 are gated on Phase 7 (`disk_init_ok` flag). A failed or skipped Phase 7 causes downstream phases to report `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success.
 
 **`beforeCleanup` multi-word value encoding**
 

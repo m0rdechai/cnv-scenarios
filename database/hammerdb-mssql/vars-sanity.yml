@@ -15,7 +15,7 @@ rootStorage: "80Gi"
 dataDisks: 2
 diskSize: "100Gi"
 storageClassName: "ocs-storagecluster-ceph-rbd"
-volumeMode: "Filesystem"
+volumeMode: "Block"
 
 # REQUIRED when running: set to "docker://…" or "http(s)://….qcow2" before executing.
 # Left empty here so the template renders; the test will fail at VM creation without a real URL.

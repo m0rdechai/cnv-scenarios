@@ -598,7 +598,7 @@ windowsImageUrl=docker://... ./run-workloads.sh hammerdb-mssql --mode sanity
 windowsImageUrl=docker://... cpuCores=16 memory=32Gi dataDisks=5 diskSize=200Gi ./run-workloads.sh hammerdb-mssql
 ```
 
-**Validation flow — `check_windows_vm` (10 phases):**
+**Validation flow — `check_windows_vm` (12 phases):**
 
 | Phase | Name | What Is Checked | Controlled By |
 |-------|------|-----------------|---------------|
@@ -612,8 +612,10 @@ windowsImageUrl=docker://... cpuCores=16 memory=32Gi dataDisks=5 diskSize=200Gi 
 | 8 | Disk count/size | Non-system disk count and total size match `dataDisks × diskSize` (5% tolerance) | `validateDisks`, `dataDisks`, `diskSize` |
 | 9 | Disk utilization | Measures used space on non-C: volumes; asserts against `expectedDiskUtilGB` or reports only when `0` | `validateDiskUtil`, `expectedDiskUtilGB`, `diskUtilTolerancePct` |
 | 10 | Post-process util | Waits for `waitProcessName` to exit (polling every 30s up to `waitProcessTimeout` minutes), then asserts disk utilization matches `expectedDiskUtilAfterProcessGB` | `validateDiskUtilAfterProcess`, `waitProcessName`, `waitProcessTimeout`, `expectedDiskUtilAfterProcessGB` |
+| 11 | FIO data generation | Fills extra disks (E:, F:, ...) with high-entropy data via FIO; validates per-drive dir/file/size counts | `fillExtraDisks`, `fioUrl`, `dirCount`, `filesPerDir`, `fileSize`, `depthCount`, `fioTimeout`, `expectedExtraDiskCapacityGB` |
+| 12 | Aggregate disk util | Total used space across all non-C: drives (HammerDB + FIO); asserts against `expectedTotalDiskUtilGB` | `fillExtraDisks`, `expectedTotalDiskUtilGB`, `diskUtilTolerancePct` |
 
-Phases 8–10 are gated on Phase 7. If disk initialization fails, all downstream disk phases are skipped and reported as `SKIP`.
+Phases 8–12 are gated on Phase 7. If disk initialization fails, all downstream disk phases are skipped and reported as `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success.
 
 All phases are individually toggle-able via `vars.yml`. Setting a toggle to `false` records `SKIP` in the JSON report and does not affect `overall_status`.
 
@@ -704,7 +706,7 @@ All validation functions are wrapped by a retry mechanism (up to 130 retries wit
 | `check_high_memory` | High memory allocation + guest OS (`free -m`) | Yes (key-based) | 15% tolerance |
 | `check_large_disk` | Large disk visibility + size in guest OS (`lsblk`) | Yes (key-based) | 4-phase validation |
 | `check_performance_metrics` | System responsiveness (`uptime`, `free -m`, `uname`) | Yes (password-based) | For CirrOS VMs via sshpass |
-| `check_windows_vm` | 11-phase Windows VM validation: SSH, OS version, services, CPU, memory, NICs, disk init, disk count/size, disk utilization, post-process utilization | Yes (key-based, `virtctl ssh` + PowerShell) | `key=value` arg pattern; all phases individually toggle-able; see [Database Testing](#database-testing) |
+| `check_windows_vm` | 12-phase Windows VM validation: SSH, OS version, services, CPU, memory, NICs, disk init, disk count/size, disk utilization, post-process utilization, FIO data generation, aggregate disk utilization | Yes (key-based, `virtctl ssh` + PowerShell) | `key=value` arg pattern; all phases individually toggle-able; see [Database Testing](#database-testing) |
 
 ## Advanced Usage
 
