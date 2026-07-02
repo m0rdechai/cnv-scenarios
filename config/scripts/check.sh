@@ -112,7 +112,7 @@ remote_command() {
         --local-ssh-opts="-o PasswordAuthentication=no" \
         --local-ssh-opts="-o PreferredAuthentications=publickey" \
         --local-ssh-opts="-o ConnectTimeout=30" \
-        -n "${namespace}" -i "${identity_file}" -c "${command}" --username "${remote_user}" "vm/${vm_name}" 2>/dev/null)
+        -n "${namespace}" -i "${identity_file}" -c "${command}" --username "${remote_user}" "vmi/${vm_name}" 2>/dev/null)
     local ret=$?
     if [ $ret -ne 0 ]; then
         return 1
@@ -134,7 +134,7 @@ remote_command_password() {
         --local-ssh-opts="-o StrictHostKeyChecking=no" \
         --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
         --local-ssh-opts="-o ConnectTimeout=30" \
-        -n "${namespace}" -c "${command}" --username "${remote_user}" "vm/${vm_name}" 2>/dev/null)
+        -n "${namespace}" -c "${command}" --username "${remote_user}" "vmi/${vm_name}" 2>/dev/null)
     local ret=$?
     if [ $ret -ne 0 ]; then
         return 1
@@ -1722,6 +1722,8 @@ check_windows_vm() {
     for vm in ${vms}; do
         echo ""
         echo "--- Validating VM: ${vm} ---"
+        ssh_ok="false"
+        disk_init_ok="false"
 
         # Verify VM is Running
         local printable
@@ -1756,6 +1758,11 @@ check_windows_vm() {
         else
             echo "  [1/12] SSH check... SKIP"
             validations+=("{\"phase\": \"ssh_check\", \"status\": \"SKIP\", \"message\": \"validateSSH=false\"}")
+            local ssh_probe
+            ssh_probe=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "echo SSH_OK" 2>&1) || true
+            if echo "${ssh_probe}" | grep -q "SSH_OK"; then
+                ssh_ok="true"
+            fi
         fi
 
         # All remaining phases require SSH
@@ -1994,6 +2001,7 @@ check_windows_vm() {
                 echo "  [9/12] Disk utilization check... SKIP (disk init failed)"
                 validations+=("{\"phase\": \"disk_util\", \"status\": \"SKIP\", \"message\": \"Skipped — disk initialization failed\"}")
             else
+                # TODO: Extract check_disk_util_value() helper to DRY this pattern (see M-5 in code review)
                 local util_json
                 util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
                 local guest_used_gb
@@ -2073,6 +2081,7 @@ check_windows_vm() {
 
                 if [ "${process_done}" = "true" ]; then
                     # Measure disk utilization now
+                    # TODO: Extract check_disk_util_value() helper to DRY this pattern (see M-5 in code review)
                     local post_util_json
                     post_util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
                     local post_used_gb
@@ -2118,6 +2127,7 @@ check_windows_vm() {
         # ──────────────────────────────────────
         # Phase 11: FIO data generation on extra disks
         # ──────────────────────────────────────
+        local fio_phase_failed="false"
         if [ "${fill_extra_disks}" = "true" ]; then
             if [ "${disk_init_ok}" != "true" ]; then
                 echo "  [11/12] FIO data generation... SKIP (disk init failed)"
@@ -2127,7 +2137,6 @@ check_windows_vm() {
                 validations+=("{\"phase\": \"fio_datagen\", \"status\": \"SKIP\", \"message\": \"Skipped — SSH not available\"}")
             else
                 echo "  [11/12] FIO data generation on extra disks..."
-                local fio_phase_failed="false"
 
                     # Sub-phase a: FIO pre-flight (check/install)
                     echo "    [11a] FIO pre-flight check/install..."
@@ -2172,7 +2181,7 @@ check_windows_vm() {
                         # fails with lstat errors. Workaround: Set-Location to each
                         # drive root and run FIO without directory= per drive.
                         local ps_generate
-                        ps_generate='$ErrorActionPreference="Stop"; '
+                        ps_generate=''
                         ps_generate+='$ex=@("C","D"); '
                         ps_generate+='$vols=Get-Volume|Where-Object{$_.DriveLetter -and $_.DriveType -eq "Fixed" -and $_.DriveLetter -notin $ex}; '
                         ps_generate+='if($vols.Count -eq 0){"DATAGEN_NO_TARGET_DRIVES"; exit 1} '
@@ -2212,8 +2221,17 @@ check_windows_vm() {
                         encoded_generate=$(printf '%s' "${ps_generate}" | iconv -t UTF-16LE | base64 -w 0)
 
                         local generate_output
-                        generate_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                            "powershell.exe -NoProfile -EncodedCommand ${encoded_generate}" 2>&1) || true
+                        generate_output=$(timeout $((fio_timeout * 60)) \
+                            virtctl ssh ${LOCAL_SSH} \
+                            --local-ssh-opts="-o StrictHostKeyChecking=no" \
+                            --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
+                            --local-ssh-opts="-o BatchMode=yes" \
+                            --local-ssh-opts="-o PasswordAuthentication=no" \
+                            --local-ssh-opts="-o PreferredAuthentications=publickey" \
+                            --local-ssh-opts="-o ConnectTimeout=30" \
+                            -n "${namespace}" -i "${private_key}" \
+                            -c "powershell.exe -NoProfile -EncodedCommand ${encoded_generate}" \
+                            --username "${vm_user}" "vmi/${vm}" 2>&1) || true
 
                         local gen_summary
                         gen_summary=$(echo "${generate_output}" | grep -E "DATAGEN_" | tail -5)
@@ -2234,9 +2252,9 @@ check_windows_vm() {
                             overall_status="FAILED"
                             fio_phase_failed="true"
                         else
-                            echo "    FAIL: FIO data generation timed out or returned unexpected output"
-                            log_validation_checkpoint "fio_datagen" "FAIL" "FIO datagen timeout or unexpected output"
-                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"FIO data generation timed out after ${fio_timeout}m or returned unexpected output\"}")
+                            echo "    FAIL: FIO data generation failed or timed out after ${fio_timeout}m"
+                            log_validation_checkpoint "fio_datagen" "FAIL" "FIO datagen failed or timed out after ${fio_timeout}m"
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"FIO data generation failed or timed out after ${fio_timeout}m\"}")
                             overall_status="FAILED"
                             fio_phase_failed="true"
                         fi
@@ -2291,13 +2309,14 @@ check_windows_vm() {
                         fi
 
                         # Sub-phase d: FIO-only aggregate check
+                        # TODO: Extract check_disk_util_value() helper to DRY this pattern (see M-5 in code review)
                         if [ "${expected_extra_disk_capacity_gb}" -gt 0 ]; then
                             local fio_total_gb=0
                             while IFS= read -r line; do
                                 if [[ "${line}" == DATAGEN_RESULT:* ]]; then
                                     local drive_gb
                                     drive_gb=$(echo "${line}" | grep -oP 'usedGB=\K[0-9.]+' || echo "0")
-                                    fio_total_gb=$(echo "${fio_total_gb} + ${drive_gb}" | bc)
+                                    fio_total_gb=$(awk "BEGIN{printf \"%.2f\", ${fio_total_gb} + ${drive_gb}}")
                                 fi
                             done <<< "${validate_output}"
                             local fio_total_gb_int
@@ -2308,8 +2327,12 @@ check_windows_vm() {
                             [ "${extra_diff}" -lt 0 ] && extra_diff=$((-extra_diff))
                             if [ "${extra_diff}" -le "${extra_tolerance}" ]; then
                                 echo "    PASS: FIO total ${fio_total_gb_int}GB (expected ~${expected_extra_disk_capacity_gb}GB +/-${disk_util_tolerance_pct}%)"
+                                log_validation_checkpoint "fio_extra_capacity" "PASS" "FIO total ${fio_total_gb_int}GB within tolerance of ${expected_extra_disk_capacity_gb}GB"
+                                validations+=("{\"phase\": \"fio_extra_capacity\", \"status\": \"PASS\", \"message\": \"FIO total ${fio_total_gb_int}GB (expected ~${expected_extra_disk_capacity_gb}GB)\"}")
                             else
                                 echo "    FAIL: FIO total ${fio_total_gb_int}GB (expected ~${expected_extra_disk_capacity_gb}GB +/-${disk_util_tolerance_pct}%)"
+                                log_validation_checkpoint "fio_extra_capacity" "FAIL" "FIO total ${fio_total_gb_int}GB outside tolerance of ${expected_extra_disk_capacity_gb}GB"
+                                validations+=("{\"phase\": \"fio_extra_capacity\", \"status\": \"FAIL\", \"message\": \"FIO total ${fio_total_gb_int}GB (expected ~${expected_extra_disk_capacity_gb}GB)\"}")
                                 overall_status="FAILED"
                             fi
                         fi
@@ -2323,8 +2346,9 @@ check_windows_vm() {
         # ──────────────────────────────────────
         # Phase 12: Aggregate total disk utilization
         # ──────────────────────────────────────
-        if [ "${fill_extra_disks}" = "true" ] && [ "${disk_init_ok}" = "true" ] && [ "${ssh_ok}" = "true" ]; then
+        if [ "${fill_extra_disks}" = "true" ] && [ "${disk_init_ok}" = "true" ] && [ "${ssh_ok}" = "true" ] && [ "${fio_phase_failed}" != "true" ]; then
             echo "  [12/12] Aggregate total disk utilization (all non-C: drives)..."
+            # TODO: Extract check_disk_util_value() helper to DRY this pattern (see M-5 in code review)
             local total_util_json
             total_util_json=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" "${windows_guest_disk_util_cmd}" 2>/dev/null || echo "{}")
             local total_used_gb

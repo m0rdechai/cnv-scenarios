@@ -59,6 +59,13 @@ EOF
     echo "Validation report saved to: ${report_file}"
 }
 
+# Detect --local-ssh support in virtctl (v1.1+)
+if virtctl ssh --help 2>&1 | grep -qc "\-\-local-ssh "; then
+    LOCAL_SSH="--local-ssh"
+else
+    LOCAL_SSH=""
+fi
+
 #############################################
 # CHECK_VM_RUNNING FUNCTION
 # With configurable percentage-based SSH validation
@@ -222,7 +229,7 @@ function check_vm_running() {
                 fi
 
                 local ssh_test
-                ssh_test=$(virtctl ssh \
+                ssh_test=$(virtctl ssh ${LOCAL_SSH} \
                     --local-ssh-opts="-o StrictHostKeyChecking=no" \
                     --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
                     --local-ssh-opts="-o ConnectTimeout=15" \
