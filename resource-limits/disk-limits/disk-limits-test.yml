@@ -113,7 +113,7 @@ jobs:
       OS: fedora
       cpuCores: {{ .cpuCores | default 16 }}
       memory: {{ .memory | default "32Gi" }}
-      url: {{ .imageUrl | default "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2" }}
+      url: {{ .imageUrl | default "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2" }}
       # Disk configuration - can be overridden via CLI
       diskCount: {{ .diskCount | default 1 }}
       storage: {{ .diskSize | default "10Gi" }}

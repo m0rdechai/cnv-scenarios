@@ -2096,6 +2096,11 @@ check_windows_vm() {
                         validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"FAIL\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; disk_util command returned no data (SSH or PowerShell failure)\"}")
                         overall_status="FAILED"
                     else
+                        if [ "${expected_disk_util_after_gb}" -eq 0 ]; then
+                            echo "    PASS: Post-process disk utilization is ${post_used_gb}GB (no target set, reporting only)"
+                            log_validation_checkpoint "disk_util_after_process" "PASS" "Used ${post_used_gb}GB (report-only)"
+                            validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"PASS\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; used ${post_used_gb}GB (report-only)\"}")
+                        else
                         local post_tolerance=$((expected_disk_util_after_gb * disk_util_tolerance_pct / 100))
                         [ "${post_tolerance}" -lt 5 ] && post_tolerance=5
                         local post_diff=$((expected_disk_util_after_gb - post_used_gb))
@@ -2110,6 +2115,7 @@ check_windows_vm() {
                             log_validation_checkpoint "disk_util_after_process" "FAIL" "Used ${post_used_gb}GB vs expected ${expected_disk_util_after_gb}GB"
                             validations+=("{\"phase\": \"disk_util_after_process\", \"status\": \"FAIL\", \"message\": \"Process ${wait_process_name} exited after ${elapsed_polls_min}m; used ${post_used_gb}GB (expected ~${expected_disk_util_after_gb}GB +/-${disk_util_tolerance_pct}%)\"}")
                             overall_status="FAILED"
+                        fi
                         fi
                     fi
                 else

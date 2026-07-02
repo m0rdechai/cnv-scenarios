@@ -44,7 +44,7 @@ guestOS: linux
 # windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
 
 # VM Image Configuration
-imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"  # Fedora cloud image URL
+imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"  # Fedora cloud image URL
 
 # Test Execution Control
 counter: 1                                 # Test iteration counter (0 triggers cleanup)

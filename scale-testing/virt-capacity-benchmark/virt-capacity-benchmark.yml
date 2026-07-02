@@ -96,7 +96,7 @@ jobs:
     inputVars:
       name: {{ $vmName }}
       counter: {{ .counter | toString }}
-      rootDiskImage: quay.io/containerdisks/fedora:41
+      rootDiskImage: quay.io/containerdisks/fedora:44
       storageClassName: {{ .storageClassName }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}

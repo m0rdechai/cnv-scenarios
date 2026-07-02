@@ -154,9 +154,10 @@ waitProcessName: "hammerdb"
 # Maximum minutes to wait for the process to exit before failing phase 10.
 waitProcessTimeout: 45
 # Expected disk utilization (GB) after the process exits.
-# Observed HammerDB + MSSQL database size on a 3×100Gi disk set ≈ 68GB;
-# 70GB target with 30% tolerance gives a ±21GB acceptance window (49–91GB).
-expectedDiskUtilAfterProcessGB: 70
+# Set to 0 for report-only mode. On retries, FIO data from Phase 11
+# inflates this measurement, making a fixed target unreliable.
+# Phase 12 provides the aggregate assertion after all data generation completes.
+expectedDiskUtilAfterProcessGB: 0
 
 # ─── FIO Data Generation on Extra Disks (Phase 11) ──────────────────────────
 # After HammerDB completes on D:, generate high-entropy data on all non-C:/D:

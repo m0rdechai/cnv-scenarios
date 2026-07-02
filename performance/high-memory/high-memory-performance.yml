@@ -119,7 +119,7 @@ jobs:
       nodeSelector: {{ .nodeSelector | default "" }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
       cloudInitSecret: {{ $cloudInitSecretName }}
-      baseImage: {{ .baseImage | default "quay.io/containerdisks/fedora:41" }}
+      baseImage: {{ .baseImage | default "quay.io/containerdisks/fedora:44" }}
       vmLabels:
         {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
 {{- end }}

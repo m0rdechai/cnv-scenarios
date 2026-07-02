@@ -40,7 +40,7 @@ memory: "32Gi"                             # Memory allocation per VM
 storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisioning
 
 # VM Image Configuration
-baseImage: "quay.io/containerdisks/fedora:41"  # Container disk image for root disk
+baseImage: "quay.io/containerdisks/fedora:44"  # Container disk image for root disk
 osType: "rhel9"                            # Operating system type
 
 # Guest OS Configuration (Linux or Windows)

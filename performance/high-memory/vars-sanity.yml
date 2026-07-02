@@ -23,7 +23,7 @@ storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Filesystem"
 
 # VM Image Configuration
-baseImage: "quay.io/containerdisks/fedora:41"
+baseImage: "quay.io/containerdisks/fedora:44"
 osType: "fedora"
 
 # Guest OS Configuration (Linux or Windows)

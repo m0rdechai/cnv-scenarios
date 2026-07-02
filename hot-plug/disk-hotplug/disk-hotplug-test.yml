@@ -122,11 +122,11 @@ jobs:
       counter: {{ .counter | toString }}
       OS: Fedora
       VMIrunning: {{ .vmRunning | default true }}
-      baseImage: {{ .baseImage | default "quay.io/containerdisks/fedora:41" }}
+      baseImage: {{ .baseImage | default "quay.io/containerdisks/fedora:44" }}
       memory: {{ .memory | default "4Gi" }}
       cpuCores: {{ .cpuCores | default 2 }}
       sshPublicKeySecret: {{ $sshPublicKeySecretName }}
-      url: {{ .imageUrl | default "https://dl.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2" }}
+      url: {{ .imageUrl | default "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2" }}
       nodeSelector: {{ .nodeSelector | default "" }}
       storage: {{ .storage | default "20Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
