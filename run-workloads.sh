@@ -310,7 +310,9 @@ setup_per_host_density() {
             --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | head -1)
         if [[ -n "$first_worker" ]]; then
             export targetNode="$first_worker"
+            sed -i "s#^targetNode:.*#targetNode: \"${first_worker}\"#" "$vars_file"
             logmain INFO "[per-host-density] Auto-selected targetNode: $targetNode"
+            logmain DEBUG "[per-host-density] Wrote targetNode=${first_worker} to vars file"
         fi
     fi
     
@@ -569,7 +571,8 @@ run_single_test() {
         case "$_key" in PROM|PROM_TOKEN|esServer|resultsPath|runTimestamp) continue ;; esac
         local _val="${!_key}"
         [[ -z "$_val" ]] && continue
-        sed -i "s#^${_key}:.*#${_key}: \"${_val}\"#" "$temp_vars"
+        local _escaped_val="${_val//&/\\&}"
+        sed -i "s#^${_key}:.*#${_key}: \"${_escaped_val}\"#" "$temp_vars"
     done < "$temp_vars"
 
     # Inject guestOS from --os flag (authoritative override of env var or vars file)
@@ -587,6 +590,12 @@ run_single_test() {
             _current_prefix=$(grep "^testNamespacePrefix:" "$temp_vars" | head -1 | awk '{print $2}' | tr -d "\"'")
             sed -i "s#^testNamespacePrefix:.*#testNamespacePrefix: \"${_current_prefix}-${target_os}\"#" "$temp_vars"
             logmain DEBUG "[$qualified_name] Qualified testNamespacePrefix to ${_current_prefix}-${target_os} for --os both"
+        fi
+        if grep -q "^testNamespace:" "$temp_vars" 2>/dev/null; then
+            local _current_ns
+            _current_ns=$(grep "^testNamespace:" "$temp_vars" | head -1 | awk '{print $2}' | tr -d "\"'")
+            sed -i "s#^testNamespace:.*#testNamespace: \"${_current_ns}-${target_os}\"#" "$temp_vars"
+            logmain DEBUG "[$qualified_name] Qualified testNamespace to ${_current_ns}-${target_os} for --os both"
         fi
     fi
 
@@ -1318,6 +1327,10 @@ main() {
         run_single_test "$_test" "$_os" || exit_code=$?
     else
         # Multiple tests — handle nic-hotplug sequencing for --os both --parallel
+        # NOTE: --os both --parallel may cause races when the same base test runs
+        # linux + windows concurrently (shared test directory for template rendering).
+        # Known limitation: use --os both without --parallel for guaranteed safety.
+        # Only nic-hotplug is serialized due to NNCP resource conflicts.
         if [[ "$EXECUTION" == "parallel" && "$OS_FLAG" == "both" ]]; then
             # Split nic-hotplug entries out for sequential execution
             local _parallel_batch=()
