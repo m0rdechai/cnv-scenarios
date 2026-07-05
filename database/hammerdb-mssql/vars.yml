@@ -136,17 +136,23 @@ validateDisks: true
 # [Phase 9] Verify used space on non-C: fixed volumes against expectedDiskUtilGB.
 # Set expectedDiskUtilGB=0 to enable report-only mode: utilization is logged but
 # no assertion is made. Set a non-zero value to enforce a target ±diskUtilTolerancePct.
+# This is measured BEFORE HammerDB exits — it captures MSSQL data written so far.
+# Observed value: ~48GB for TPC-C with 8 cores / 16Gi RAM.
+# Leave at 0 (report-only) because exact mid-run data size is workload-dependent.
 validateDiskUtil: true
-# 0 = report actual usage without asserting a target (see note above).
 expectedDiskUtilGB: 0
-# Percentage tolerance applied to all disk utilization assertions (phases 9 and 10).
+# Percentage tolerance applied to all disk utilization assertions (phases 9, 10, 12).
 # Minimum enforced floor is 5GB to account for filesystem metadata variance.
-# Example: expectedDiskUtilAfterProcessGB=70, diskUtilTolerancePct=30 → ±21GB window.
+# Example: expectedTotalDiskUtilGB=148, diskUtilTolerancePct=30 → ±44GB window.
 diskUtilTolerancePct: 30
 
 # [Phase 10] After waitProcessName exits, verify disk utilization matches
 # expectedDiskUtilAfterProcessGB ±diskUtilTolerancePct%.
-# Useful for confirming HammerDB populated the expected amount of data.
+# Captures HammerDB's final MSSQL data size on D: (plus any prior FIO data on E:/F:).
+# Set to 0 for report-only mode (recommended). On retries, FIO data from Phase 11
+# inflates this measurement, making a fixed target unreliable across runs.
+# Phase 12 provides the aggregate assertion after all data generation completes.
+# Observed value: ~48GB for a fresh run (HammerDB only on D:).
 validateDiskUtilAfterProcess: true
 # Name of the Windows process (Get-Process) or scheduled task to wait for.
 # Polling interval is 30s; maximum wait = waitProcessTimeout minutes.
@@ -154,9 +160,7 @@ waitProcessName: "hammerdb"
 # Maximum minutes to wait for the process to exit before failing phase 10.
 waitProcessTimeout: 45
 # Expected disk utilization (GB) after the process exits.
-# Set to 0 for report-only mode. On retries, FIO data from Phase 11
-# inflates this measurement, making a fixed target unreliable.
-# Phase 12 provides the aggregate assertion after all data generation completes.
+# 0 = report-only (recommended — see note above).
 expectedDiskUtilAfterProcessGB: 0
 
 # ─── FIO Data Generation on Extra Disks (Phase 11) ──────────────────────────
@@ -188,14 +192,18 @@ depthCount: 1
 fioTimeout: 30
 
 # [Phase 11] Expected FIO-written capacity (GB) across ALL extra disks.
+# Formula: (dataDisks - 1) × dirCount × filesPerDir × fileSize(GB)
+# Example: (3 - 1) × 5 × 10 × 1GB = 100GB
 # 0 = report-only mode (logs utilization without asserting).
-expectedExtraDiskCapacityGB: 0
+expectedExtraDiskCapacityGB: 100
 
 # [Phase 12] Expected TOTAL disk utilization (GB) across ALL non-C: drives after
 # both HammerDB (D:) and FIO (E:, F:, …) complete.
+# Formula: HammerDB_data + FIO_data = ~48GB + (dataDisks-1)×dirCount×filesPerDir×fileSize
+# Example: 48 + 100 = 148GB (with diskUtilTolerancePct=30 → ±44GB window: 104–192GB)
 # Asserts measured total is within diskUtilTolerancePct of this value.
 # 0 = report-only (logs total without asserting).
-expectedTotalDiskUtilGB: 0
+expectedTotalDiskUtilGB: 148
 
 # ─── Observability ──────────────────────────────────────────────────────────
 
