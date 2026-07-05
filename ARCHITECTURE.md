@@ -207,6 +207,15 @@ When `--parallel` is used with multiple tests:
 
 This approach handles the bash limitation where associative arrays don't propagate from subshells.
 
+#### `--os both --parallel` Specifics
+
+When combining `--os both` with `--parallel`, additional logic applies:
+
+1. **Test expansion** (`expand_tests_for_os`): Each test supporting `both` becomes two OS-qualified entries (`test:linux`, `test:windows`). Linux-only and Windows-only tests remain singular.
+2. **Namespace qualification**: `testNamespace` and `testNamespacePrefix` gain `-linux`/`-windows` suffixes to prevent resource collisions between concurrent OS variants.
+3. **NIC hot-plug serialization**: `nic-hotplug:linux` and `nic-hotplug:windows` are removed from the parallel batch and run sequentially after all other tests finish. This avoids NNCP conflicts when both runs target the same physical NIC.
+4. **Shared directory caveat**: Both OS variants of the same test execute within a single source directory concurrently. Template rendering is read-only and vars are processed into temp files, so this is safe for current templates. Future templates that write state to the source directory could race.
+
 ### Results Structure
 
 ```

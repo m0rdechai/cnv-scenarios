@@ -579,6 +579,17 @@ When `--os windows` (or `--os both`) is used, the runner automatically applies s
 
 See [docs/windows-image-build.md](docs/windows-image-build.md) for image build instructions and per-flow validation details.
 
+### `--os both --parallel` Execution Behavior
+
+When combining `--os both` with `--parallel`:
+
+1. **Test expansion**: Each test that supports `both` is expanded into two entries (`test:linux` + `test:windows`). For `--all`, this creates 19 qualified tests (8 × 2 + 2 linux-only + 1 windows-only).
+2. **Namespace qualification**: Namespaces are suffixed with `-linux` or `-windows` to prevent resource collisions between OS variants of the same test running concurrently.
+3. **NIC hot-plug serialization**: `nic-hotplug:linux` and `nic-hotplug:windows` are automatically pulled out of the parallel batch and run sequentially after all other tests complete. This prevents NNCP conflicts when both runs target the same physical NIC.
+4. **All other tests**: Run concurrently in a single parallel batch.
+
+**Known limitation:** With `--os both --parallel`, two instances of the same test execute concurrently within the same source directory. Template rendering and vars processing use read-only access and temp-file copies, so this works reliably in practice. However, if a future template writes state back to the source directory, it could race. For guaranteed isolation, use `--os both` without `--parallel` (sequential execution).
+
 ## Database Testing
 
 ### HammerDB / MSSQL
