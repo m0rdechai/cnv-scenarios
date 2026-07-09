@@ -1680,6 +1680,7 @@ check_windows_vm() {
     local fio_timeout="${cfg[fioTimeout]:-30}"
     local expected_extra_disk_capacity_gb="${cfg[expectedExtraDiskCapacityGB]:-0}"
     local expected_total_disk_util_gb="${cfg[expectedTotalDiskUtilGB]:-0}"
+    local disable_sched_task_after="${cfg[disableHammerdbSchedTaskAfterValidation]:-false}"
 
     echo "=============================================="
     echo "  Windows VM Validation (check_windows_vm)"
@@ -2391,6 +2392,56 @@ check_windows_vm() {
         else
             echo "  [12/12] Aggregate total disk utilization... SKIP"
             validations+=("{\"phase\": \"total_disk_util\", \"status\": \"SKIP\", \"message\": \"fillExtraDisks=false or prerequisites not met\"}")
+        fi
+
+        # ──────────────────────────────────────
+        # Phase 13 (optional): Disable scheduled task after validation
+        # ──────────────────────────────────────
+        # Runs after all other phases complete for this VM. When enabled, disables
+        # any Windows Scheduled Task whose name matches *<waitProcessName>* (e.g.
+        # "run_hammerdb") so it does not auto-start HammerDB again on subsequent
+        # VM reboots. Phase 10 already waited for the process/task to finish, so
+        # this only disables the task — it does not stop anything currently running.
+        if [ "${disable_sched_task_after}" = "true" ]; then
+            if [ "${ssh_ok}" != "true" ]; then
+                echo "  [13/13 optional] Disable scheduled task... SKIP (no SSH)"
+                validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"SKIP\", \"message\": \"Skipped — SSH not available\"}")
+            elif [ -z "${wait_process_name}" ]; then
+                echo "  [13/13 optional] Disable scheduled task... SKIP (no waitProcessName specified)"
+                validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"SKIP\", \"message\": \"waitProcessName is empty\"}")
+            else
+                echo "  [13/13 optional] Disabling scheduled task(s) matching '*${wait_process_name}*' so it will not run on the next reboot..."
+                # shellcheck disable=SC2016
+                local ps_disable_task
+                ps_disable_task='$tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | '
+                ps_disable_task+="Where-Object { \$_.TaskName -like '*${wait_process_name}*' }); "
+                ps_disable_task+='if ($tasks.Count -gt 0) { $tasks | Disable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null } '
+                ps_disable_task+='Write-Output "DISABLED_COUNT=$($tasks.Count)"'
+                local encoded_disable_task
+                encoded_disable_task=$(printf '%s' "${ps_disable_task}" | iconv -t UTF-16LE | base64 -w 0)
+
+                local disable_task_output
+                disable_task_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
+                    "powershell.exe -NoProfile -EncodedCommand ${encoded_disable_task}" 2>&1) || true
+
+                local disabled_count
+                disabled_count=$(echo "${disable_task_output}" | grep -oP 'DISABLED_COUNT=\K[0-9]+' || echo "")
+
+                if [ -z "${disabled_count}" ]; then
+                    echo "    FAIL: Disable scheduled task command failed"
+                    echo "    Output: ${disable_task_output}"
+                    log_validation_checkpoint "disable_sched_task" "FAIL" "Disable-ScheduledTask command error"
+                    validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"FAIL\", \"message\": \"Disable-ScheduledTask command failed for pattern '*${wait_process_name}*'\"}")
+                    overall_status="FAILED"
+                else
+                    echo "    PASS: Disabled ${disabled_count} scheduled task(s) matching '*${wait_process_name}*'"
+                    log_validation_checkpoint "disable_sched_task" "PASS" "Disabled ${disabled_count} task(s)"
+                    validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"PASS\", \"message\": \"Disabled ${disabled_count} scheduled task(s) matching '*${wait_process_name}*'; will not rerun on reboot\"}")
+                fi
+            fi
+        else
+            echo "  [13/13 optional] Disable scheduled task... SKIP"
+            validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"SKIP\", \"message\": \"disableHammerdbSchedTaskAfterValidation=false\"}")
         fi
     done
 
