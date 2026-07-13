@@ -178,7 +178,7 @@ The Ceph metrics (`cephOSD*`, `cephCluster*`) only produce data on clusters with
 Bypass the UI to see exact data frame schema:
 
 ```bash
-curl -s -u admin:admin "http://<grafana>/api/ds/query" \
+curl -s -u "$GRAFANA_USER:$GRAFANA_PASSWORD" "http://<grafana>/api/ds/query" \
   -H "Content-Type: application/json" \
   -d '{"queries":[{"refId":"A","datasource":{"type":"elasticsearch","uid":"<uid>"},
        "query":"<lucene>","metrics":[{"id":"1","type":"raw_data","settings":{"size":"1"}}],

@@ -107,7 +107,7 @@ jq: parse error: Invalid string: control characters from U+0000 through U+001F
 **Fix:** Always strip `\r` from string outputs before JSON embedding:
 
 ```bash
-value=$(remote_command ... | tr -d '\r' | head -1 | xargs)
+value=$(remote_command ... | tr -d '\r' | head -1)
 ```
 
 ### 4. `beforeCleanup` Multi-Word Parameters Are Word-Split

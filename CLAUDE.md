@@ -237,7 +237,7 @@ Detailed comparison of what each validation phase checks on Linux vs Windows. Ph
 ## Adding a New Scenario
 
 1. Create directory under the appropriate category with config, vars, vars-sanity, and template files.
-2. Add entry to `TEST_REGISTRY` in `run-workloads.sh`: `["my-test"]="category/my-test:my-test.yml:yml"`
+2. Add entry to `TEST_REGISTRY` in `run-workloads.sh`: `["my-scenario"]="category/my-scenario:my-scenario-test.yml:yml"`
 3. Add to `TEST_ORDER` array.
 4. Add validation function to `config/scripts/check.sh` (or create local check.sh for scale scenarios).
 5. Wire validation via `beforeCleanup` in the kube-burner config calling `wrapper.sh`.

@@ -9,10 +9,11 @@ globs:
 
 ## Go Template Engine
 
-kube-burner uses standard Go `text/template`. Key differences from Helm:
+kube-burner uses Go `text/template` enhanced with the [Sprig](https://masterminds.github.io/sprig/) library. Key differences from Helm:
 
-- **No Sprig functions** -- `required`, `toYaml`, `include`, `tpl`, `lookup` are all unavailable
-- **Available:** `default`, `replace`, `upper`, `lower`, `trim`, `printf`, `add`, `sub`, `mul`, `div`, `until`, `int`, `hasPrefix`, `hasSuffix`, `eq`, `ne`, `lt`, `gt`
+- **Sprig functions are available** -- `default`, `replace`, `upper`, `lower`, `trim`, `printf`, `add`, `sub`, `mul`, `div`, `until`, `int`, `hasPrefix`, `hasSuffix`, `eq`, `ne`, `lt`, `gt`, and the rest of the Sprig set
+- **Helm-only functions are NOT available** -- `include`, `tpl`, `lookup`, and `required` are Helm features, not Sprig
+- **Custom kube-burner helpers:** `Binomial`, `IndexToCombination`, `GetSubnet24`, `GetIPAddress`, `ReadFile`
 - Variables come from the vars file passed via `--user-data`
 - The `counter` variable is special: setting `counter=0` triggers a cleanup-only job
 

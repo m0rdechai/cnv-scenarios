@@ -4,6 +4,7 @@ globs:
   - "**/vm-*-windows*.yml"
   - "**/vm-windows*.yml"
   - "**/check.sh"
+  - "**/run-workloads.sh"
   - "**/windows-image-build.md"
   - "config/templates/vm-windows*.yml"
 ---
@@ -64,7 +65,7 @@ accessCredentials:
 ### Remove Deprecated Fields
 
 - `hyperv.stimer` -- removed in newer KubeVirt APIs; produces unknown field warnings
-- Do NOT use Sprig's `required` function -- kube-burner's Go template engine does not include it
+- Do NOT use Helm's `required` function -- it is a Helm feature, not a Sprig function, and is unavailable in kube-burner
 
 ### Root Disk Size
 
@@ -106,7 +107,7 @@ PowerShell output contains `\r\n` (CRLF). When embedding string output into JSON
 
 ```bash
 # Always strip \r from string output before JSON embedding
-guest_os_name=$(remote_command ... | tr -d '\r' | head -1 | xargs)
+guest_os_name=$(remote_command ... | tr -d '\r' | head -1)
 ```
 
 Numeric outputs using `tr -cd '0-9'` naturally strip `\r` already.
@@ -168,15 +169,16 @@ foreach ($vol in $TargetVolumes) {
 
 ## SSH Connectivity
 
-### `virtctl` Requires `vmi/` Prefix
+### `virtctl` Requires `type/name` Format
 
-virtctl v1.6+ requires `vmi/<vm-name>` format for SSH targets. Bare VM names fail with `target must contain type and name separated by '/'`.
+virtctl v1.6+ requires `type/name` format for SSH targets, where type is `vm` or `vmi`. Bare VM names fail with `target must contain type and name separated by '/'`. This project uses `vmi/` consistently (see `config/scripts/check.sh`).
 
 ```bash
-# CORRECT
+# CORRECT -- both forms are valid
 virtctl ssh --username Administrator vmi/my-vm-name -n namespace -c "..."
+virtctl ssh --username Administrator vm/my-vm-name -n namespace -c "..."
 
-# WRONG -- fails
+# WRONG -- fails (no type prefix)
 virtctl ssh --username Administrator my-vm-name -n namespace -c "..."
 ```
 
