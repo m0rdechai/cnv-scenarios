@@ -50,7 +50,7 @@ Results go to `/tmp/kube-burner-results/<test-name>/run-<os>-YYYYMMDD-HHMMSS/`.
 - **Modes**: `--mode sanity` (quick validation with `vars-sanity.yml`) and `--mode full` (regression with `vars.yml`)
 - **Variable override**: Environment variables override `vars.yml` values (case-sensitive)
 - **Variable naming**: camelCase and case-sensitive (e.g., `cpuCores`, `vmsPerNamespace`, `storageClassName`)
-- **Results**: Stored in `/tmp/kube-burner-results/<test>/run-YYYYMMDD-HHMMSS/`
+- **Results**: Stored in `/tmp/kube-burner-results/<test>/run-<os>-YYYYMMDD-HHMMSS/`
 - **Validation**: All tests produce structured JSON reports (`validation-*.json`) with pass/fail status
 - **Shell standards**: All `.sh` files must pass `shellcheck` and `shfmt -d -i 4 -ci`
 - **SSH validation**: Percentage-based sampling with configurable retry logic; Windows guests use `virtctl ssh` + PowerShell (see `docs/windows-image-build.md`, `guestOS` / `windowsImageUrl` in vars)
