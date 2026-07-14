@@ -166,9 +166,9 @@ expectedDiskUtilAfterProcessGB: 0
 # [Phase 13] After all validation phases complete, disable any Windows Scheduled
 # Task whose name matches *<waitProcessName>* (e.g. "run_hammerdb") so HammerDB
 # does not auto-start again on subsequent VM reboots. Requires ssh_ok and a
-# non-empty waitProcessName. Default false preserves today's behavior (task
-# stays enabled and HammerDB reruns on every reboot).
-disableHammerdbSchedTaskAfterValidation: false
+# non-empty waitProcessName. Default true. Set false to leave the task enabled
+# so HammerDB reruns on every reboot.
+disableHammerdbSchedTaskAfterValidation: true
 
 # ─── FIO Data Generation on Extra Disks (Phase 11) ──────────────────────────
 # After HammerDB completes on D:, generate high-entropy data on all non-C:/D:

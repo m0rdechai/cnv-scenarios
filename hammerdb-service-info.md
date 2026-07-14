@@ -18,15 +18,16 @@ Validation Phase 10 in `check_windows_vm` polls until the `hammerdb` process (or
 
 ## Disable it automatically via vars (no manual SSH steps)
 
-Set `disableHammerdbSchedTaskAfterValidation: true` in `database/hammerdb-mssql/vars.yml` (or `vars-sanity.yml`). After all validation phases complete for a VM, `check_windows_vm` runs an additional optional Phase 13 that disables any Scheduled Task whose name matches `*<waitProcessName>*` (e.g. `run_hammerdb`) over `virtctl ssh`, so HammerDB will not auto-start on subsequent reboots of that VM.
+By default (`disableHammerdbSchedTaskAfterValidation: true` in `database/hammerdb-mssql/vars.yml` and `vars-sanity.yml`), after all validation phases complete for a VM, `check_windows_vm` runs Phase 13 that disables any Scheduled Task whose name matches `*<waitProcessName>*` (e.g. `run_hammerdb`) over `virtctl ssh`, so HammerDB will not auto-start on subsequent reboots of that VM.
 
-- Default is `false` — today's behavior is unchanged (the task stays enabled and reruns on every reboot) unless you opt in.
+- Default is `true` — the task is disabled after validation unless you opt out.
+- Set `disableHammerdbSchedTaskAfterValidation: false` (or override via env) if you want HammerDB to auto-start again on reboot.
 - Reuses `waitProcessName` as the task-name glob pattern; no separate task-name variable is needed.
 - Phase 10 already waits for the process/task to finish before Phase 13 runs, so Phase 13 only disables the task — it does not stop anything currently running.
 - Requires `ssh_ok` (i.e. `validateSSH` succeeded) and a non-empty `waitProcessName`; otherwise Phase 13 reports `SKIP`.
 - See the `validation-windows-vm.json` report's `disable_sched_task` phase entry for the outcome (`PASS`/`FAIL`/`SKIP`).
 
-If you still need to do this by hand (e.g. on a VM from a run that didn't set the toggle), use the manual steps below.
+If you still need to do this by hand (e.g. on a VM from a run that set the toggle to `false`), use the manual steps below.
 
 ---
 

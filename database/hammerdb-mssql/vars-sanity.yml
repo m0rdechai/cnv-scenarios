@@ -47,7 +47,7 @@ validateDiskUtilAfterProcess: true
 waitProcessName: "hammerdb"
 waitProcessTimeout: 30
 expectedDiskUtilAfterProcessGB: 50
-disableHammerdbSchedTaskAfterValidation: false
+disableHammerdbSchedTaskAfterValidation: true
 
 # FIO data generation — minimal params to exercise the code path in sanity
 fillExtraDisks: true

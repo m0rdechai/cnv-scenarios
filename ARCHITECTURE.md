@@ -334,7 +334,7 @@ Phase 13 (optional): Disable scheduled task — after all other phases complete,
                       the next VM reboot; gated on disableHammerdbSchedTaskAfterValidation=true
 ```
 
-Phases 8–10 are gated on Phase 7 (`disk_init_ok` flag). A failed or skipped Phase 7 causes downstream phases to report `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success. Phase 13 gates on `disableHammerdbSchedTaskAfterValidation=true` + `ssh_ok` + a non-empty `waitProcessName`; it is independent of Phases 7–12 outcomes and defaults to `SKIP` (today's behavior — the scheduled task stays enabled and reruns on every reboot).
+Phases 8–10 are gated on Phase 7 (`disk_init_ok` flag). A failed or skipped Phase 7 causes downstream phases to report `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success. Phase 13 runs by default (`disableHammerdbSchedTaskAfterValidation=true`) when `ssh_ok` and a non-empty `waitProcessName` are present; it is independent of Phases 7–12 outcomes. Set `disableHammerdbSchedTaskAfterValidation=false` to leave the scheduled task enabled so HammerDB reruns on every reboot.
 
 **`beforeCleanup` multi-word value encoding**
 

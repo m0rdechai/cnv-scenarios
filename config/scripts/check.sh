@@ -1680,7 +1680,7 @@ check_windows_vm() {
     local fio_timeout="${cfg[fioTimeout]:-30}"
     local expected_extra_disk_capacity_gb="${cfg[expectedExtraDiskCapacityGB]:-0}"
     local expected_total_disk_util_gb="${cfg[expectedTotalDiskUtilGB]:-0}"
-    local disable_sched_task_after="${cfg[disableHammerdbSchedTaskAfterValidation]:-false}"
+    local disable_sched_task_after="${cfg[disableHammerdbSchedTaskAfterValidation]:-true}"
 
     echo "=============================================="
     echo "  Windows VM Validation (check_windows_vm)"

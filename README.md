@@ -625,9 +625,9 @@ windowsImageUrl=docker://... cpuCores=16 memory=32Gi dataDisks=5 diskSize=200Gi 
 | 10 | Post-process util | Waits for `waitProcessName` to exit (polling every 30s up to `waitProcessTimeout` minutes), then asserts disk utilization matches `expectedDiskUtilAfterProcessGB` | `validateDiskUtilAfterProcess`, `waitProcessName`, `waitProcessTimeout`, `expectedDiskUtilAfterProcessGB` |
 | 11 | FIO data generation | Fills extra disks (E:, F:, ...) with high-entropy data via FIO; validates per-drive dir/file/size counts | `fillExtraDisks`, `fioUrl`, `dirCount`, `filesPerDir`, `fileSize`, `depthCount`, `fioTimeout`, `expectedExtraDiskCapacityGB` |
 | 12 | Aggregate disk util | Total used space across all non-C: drives (HammerDB + FIO); asserts against `expectedTotalDiskUtilGB` | `fillExtraDisks`, `expectedTotalDiskUtilGB`, `diskUtilTolerancePct` |
-| 13 (optional) | Disable scheduled task | After all other phases complete, disables any Scheduled Task matching `*waitProcessName*` (e.g. `run_hammerdb`) so it will not auto-start on the next VM reboot | `disableHammerdbSchedTaskAfterValidation` (default `false`), `waitProcessName` |
+| 13 (optional) | Disable scheduled task | After all other phases complete, disables any Scheduled Task matching `*waitProcessName*` (e.g. `run_hammerdb`) so it will not auto-start on the next VM reboot | `disableHammerdbSchedTaskAfterValidation` (default `true`), `waitProcessName` |
 
-Phases 8–12 are gated on Phase 7. If disk initialization fails, all downstream disk phases are skipped and reported as `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success. Phase 13 gates on `disableHammerdbSchedTaskAfterValidation=true` + `ssh_ok` + a non-empty `waitProcessName`, and does not depend on Phase 7–12 outcomes.
+Phases 8–12 are gated on Phase 7. If disk initialization fails, all downstream disk phases are skipped and reported as `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success. Phase 13 runs by default (`disableHammerdbSchedTaskAfterValidation=true`) when `ssh_ok` and a non-empty `waitProcessName` are present, and does not depend on Phase 7–12 outcomes. Set `disableHammerdbSchedTaskAfterValidation=false` to leave the scheduled task enabled.
 
 All phases are individually toggle-able via `vars.yml`. Setting a toggle to `false` records `SKIP` in the JSON report and does not affect `overall_status`.
 
@@ -644,8 +644,9 @@ waitProcessName: "hammerdb"         # Process/scheduled-task name to wait for be
 waitProcessTimeout: 45              # Max minutes to wait
 expectedDiskUtilAfterProcessGB: 70  # Expected GB used after HammerDB finishes
 diskUtilTolerancePct: 30            # % tolerance on disk utilization assertions
-disableHammerdbSchedTaskAfterValidation: false  # true = disable the *waitProcessName* scheduled
-                                                 # task after validation so it won't rerun on reboot
+disableHammerdbSchedTaskAfterValidation: true   # default: disable *waitProcessName* scheduled task
+                                                 # after validation so it won't rerun on reboot;
+                                                 # set false to leave the task enabled
 ```
 
 > **Multi-word `expectedOS` values** are safe to use in `vars.yml`. The `beforeCleanup` command template automatically encodes spaces as underscores before passing to the script, which decodes them back. Do not use underscores in OS names that actually contain underscores.
