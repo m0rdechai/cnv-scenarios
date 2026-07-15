@@ -2439,7 +2439,11 @@ check_windows_vm() {
                 ps_disable_task='$tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | '
                 ps_disable_task+="Where-Object { \$_.TaskName -like '*${wait_process_name}*' }); "
                 ps_disable_task+='foreach ($t in $tasks) { try { Disable-ScheduledTask -InputObject $t -ErrorAction Stop | Out-Null } catch {} } '
-                ps_disable_task+='$stillEnabled = @($tasks | ForEach-Object { Get-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue } | Where-Object { $_ -and $_.State -ne "Disabled" }); '
+                # Re-query Settings.Enabled (the registration-level flag), not State: State
+                # reflects live execution status (e.g. "Running" for an in-flight instance)
+                # and does not flip to "Disabled" just because the task was disabled while
+                # an instance was still executing.
+                ps_disable_task+='$stillEnabled = @($tasks | ForEach-Object { Get-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue } | Where-Object { $_ -and $_.Settings.Enabled }); '
                 ps_disable_task+='Write-Output "MATCHED_COUNT=$($tasks.Count)"; '
                 ps_disable_task+='Write-Output "STILL_ENABLED_COUNT=$($stillEnabled.Count)"'
                 local encoded_disable_task
