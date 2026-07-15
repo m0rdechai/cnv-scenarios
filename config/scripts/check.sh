@@ -2214,12 +2214,16 @@ check_windows_vm() {
                         if [ "${depth_count}" -le 1 ]; then
                             ps_generate+='$fn="fio_data_dir_${d}jobnum\bench_file_${d}filenum.dat"; '
                         else
+                            # Build $fn as a chain of concatenated PS string literals, one
+                            # "fio_data_dir_$jobnum\" segment per nesting level, since a
+                            # backslash does not escape the closing quote in PowerShell
+                            # double-quoted strings (unlike bash/C) -- each segment must be
+                            # its own complete, separately-closed string literal.
                             local depth_expr='$fn='
                             for ((dd = 0; dd < depth_count; dd++)); do
-                                [ "${dd}" -gt 0 ] && depth_expr+='"\"+'
-                                depth_expr+='"fio_data_dir_${d}jobnum'
+                                depth_expr+='"fio_data_dir_${d}jobnum\"+'
                             done
-                            depth_expr+='\bench_file_${d}filenum.dat"; '
+                            depth_expr+='"bench_file_${d}filenum.dat"; '
                             ps_generate+="${depth_expr}"
                         fi
                         ps_generate+='$fio=(Get-Command fio.exe -EA SilentlyContinue).Source; if(-not $fio){$fio="C:\Program Files\fio\fio.exe"} '

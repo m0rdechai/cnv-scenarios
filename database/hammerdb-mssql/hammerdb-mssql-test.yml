@@ -1,7 +1,7 @@
 {{- $PROM := .PROM -}}
 {{- $PROM_TOKEN := .PROM_TOKEN -}}
 {{- $kubeBurnerFQDN := "kube-burner.io" -}}
-{{- $testName := "cnv-hammerdb-mssql" }}
+{{- $testName := .testName | default "cnv-hammerdb-mssql" -}}
 {{- $nsName := .testNamespace | default "cnv-hammerdb-mssql" -}}
 {{- $vmCount := .vmCount | default 1 -}}
 {{- $vmName := "hammerdb-mssql-vm" -}}

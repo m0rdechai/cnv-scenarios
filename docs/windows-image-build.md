@@ -91,7 +91,7 @@ If workers are already running when validation starts, the bootstrap is skipped 
   - **Phase 9** -- reports disk utilization before HammerDB finishes; set `expectedDiskUtilGB=0` for report-only mode.
   - **Phase 10** -- polls for the `hammerdb` process/scheduled-task to exit (every 30s, up to `waitProcessTimeout` minutes), then asserts disk utilization is within `diskUtilTolerancePct`% of `expectedDiskUtilAfterProcessGB`.
   - **Phase 11** -- FIO data generation on extra disks (E:, F:, ...). Gated by `fillExtraDisks=true`. Checks/deploys FIO, generates high-entropy data via inline PowerShell (logic mirrors `database/hammerdb-mssql/scripts/fio-datagen.ps1`, which serves as a standalone reference), and validates per-drive dir/file/size counts. See [FIO data generation](#fio-data-generation-on-extra-disks) below.
-  - **Phase 12** -- Aggregate total disk utilization across all non-C: drives (HammerDB on D: + FIO on E:/F:/...). Asserts against `expectedTotalDiskUtilGB` within `diskUtilTolerancePct`.
+  - **Phase 12** -- Aggregate total disk utilization across all non-C: drives (HammerDB on D: + FIO on E:/F:/...). Also gated by `fillExtraDisks=true`. Asserts against `expectedTotalDiskUtilGB` within `diskUtilTolerancePct`.
 
 **`expectedOS` encoding:** The `expectedOS` value in `vars.yml` (e.g. `"Windows Server 2022"`) contains spaces. The `beforeCleanup` template encodes spaces as underscores before passing to the shell (`Windows_Server_2022`), and `check_windows_vm` decodes them back. This means the OS check performs a case-insensitive substring match for `"Windows Server 2022"` against the guest's `Win32_OperatingSystem.Caption`. Do not use literal underscores in `expectedOS` values unless they are part of the actual OS name.
 
@@ -125,7 +125,7 @@ virt-customize -a winmssql2022.qcow2 --upload fio-3.38-x64.msi:/fio-install.msi 
 
 | Variable | Default | Description |
 |---|---|---|
-| `fillExtraDisks` | `true` | Enable FIO data generation on non-C:/D: drives |
+| `fillExtraDisks` | `false` | Enable FIO data generation on non-C:/D: drives. Phases 11/12 only run when this is explicitly set to `true`. |
 | `fioUrl` | GitHub releases (3.38) | MSI download URL for runtime install |
 | `dirCount` | `5` | Directories per disk (FIO `numjobs`) |
 | `filesPerDir` | `10` | Files per directory (FIO `nrfiles`) |
