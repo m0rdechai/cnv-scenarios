@@ -571,7 +571,9 @@ run_single_test() {
         case "$_key" in PROM|PROM_TOKEN|esServer|resultsPath|runTimestamp) continue ;; esac
         local _val="${!_key}"
         [[ -z "$_val" ]] && continue
-        local _escaped_val="${_val//&/\\&}"
+        local _escaped_val="${_val//\\/\\\\}"
+        _escaped_val="${_escaped_val//&/\\&}"
+        _escaped_val="${_escaped_val//#/\\#}"
         sed -i "s#^${_key}:.*#${_key}: \"${_escaped_val}\"#" "$temp_vars"
     done < "$temp_vars"
 
@@ -601,21 +603,39 @@ run_single_test() {
 
     # Auto-correct vmUser when guestOS is switched to windows but vmUser was not
     # explicitly overridden (Linux defaults like 'fedora'/'cloud-user' won't work).
+    # Fallback-only: skip the write if the vars file already set it to Administrator
+    # (e.g. hammerdb-mssql), so this never clobbers an already-correct explicit value.
     local _effective_guest_os
     _effective_guest_os=$(grep "^guestOS:" "$temp_vars" 2>/dev/null | awk '{print $2}' | tr -d '"' | tr -d "'")
     if [[ "$_effective_guest_os" == "windows" && -z "${vmUser:-}" ]]; then
-        sed -i "s#^vmUser:.*#vmUser: \"Administrator\"#" "$temp_vars"
-        logmain DEBUG "[$qualified_name] Auto-set vmUser=Administrator for guestOS=windows"
+        local _current_vmuser
+        _current_vmuser=$(grep "^vmUser:" "$temp_vars" 2>/dev/null | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+        if [[ "$_current_vmuser" != "Administrator" ]]; then
+            sed -i "s#^vmUser:.*#vmUser: \"Administrator\"#" "$temp_vars"
+            logmain DEBUG "[$qualified_name] Auto-set vmUser=Administrator for guestOS=windows"
+        fi
     fi
 
     # Auto-set Windows-appropriate maxWaitTimeout (CDI import + boot takes longer).
+    # Fallback-only: this is a 30m *floor*, not a fixed overwrite, so a scenario's own
+    # larger tuned value (e.g. hammerdb-mssql's 60m, large-disk's 120m) is never
+    # silently downgraded -- only values below the floor get bumped up.
     if [[ "$_effective_guest_os" == "windows" && -z "${maxWaitTimeout:-}" ]]; then
         if grep -q "^maxWaitTimeout:" "$temp_vars" 2>/dev/null; then
-            sed -i "s#^maxWaitTimeout:.*#maxWaitTimeout: \"30m\"#" "$temp_vars"
+            local _current_wait
+            _current_wait=$(grep "^maxWaitTimeout:" "$temp_vars" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+            local _wait_num=${_current_wait//[!0-9]/}
+            local _wait_unit=${_current_wait//[0-9]/}
+            local _wait_minutes="${_wait_num:-0}"
+            [[ "$_wait_unit" == "h" ]] && _wait_minutes=$((_wait_num * 60))
+            if [[ -z "$_wait_num" || "$_wait_minutes" -lt 30 ]]; then
+                sed -i "s#^maxWaitTimeout:.*#maxWaitTimeout: \"30m\"#" "$temp_vars"
+                logmain DEBUG "[$qualified_name] Auto-increased maxWaitTimeout to 30m floor for guestOS=windows (was ${_current_wait})"
+            fi
         else
             echo 'maxWaitTimeout: "30m"' >> "$temp_vars"
+            logmain DEBUG "[$qualified_name] Auto-set maxWaitTimeout=30m for guestOS=windows"
         fi
-        logmain DEBUG "[$qualified_name] Auto-set maxWaitTimeout=30m for guestOS=windows"
     fi
 
     # Auto-set windowsRootDiskSize when not present (Windows images need >=90Gi).
@@ -627,13 +647,20 @@ run_single_test() {
     fi
 
     # Auto-increase SSH retries for Windows (OpenSSH takes longer to start).
+    # Fallback-only: 20 is a floor, not a fixed overwrite, so a scenario's own larger
+    # tuned value (e.g. per-host-density full mode's 240) is never silently downgraded.
     if [[ "$_effective_guest_os" == "windows" && -z "${max_ssh_retries:-}" ]]; then
         if grep -q "^max_ssh_retries:" "$temp_vars" 2>/dev/null; then
-            sed -i "s#^max_ssh_retries:.*#max_ssh_retries: 20#" "$temp_vars"
+            local _current_retries
+            _current_retries=$(grep "^max_ssh_retries:" "$temp_vars" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+            if [[ -z "$_current_retries" || "$_current_retries" -lt 20 ]]; then
+                sed -i "s#^max_ssh_retries:.*#max_ssh_retries: 20#" "$temp_vars"
+                logmain DEBUG "[$qualified_name] Auto-increased max_ssh_retries to 20 floor for guestOS=windows (was ${_current_retries})"
+            fi
         else
             echo 'max_ssh_retries: 20' >> "$temp_vars"
+            logmain DEBUG "[$qualified_name] Auto-set max_ssh_retries=20 for guestOS=windows"
         fi
-        logmain DEBUG "[$qualified_name] Auto-set max_ssh_retries=20 for guestOS=windows"
     fi
 
     # Auto-increase VM memory for Windows (minimum 2Gi; Linux-sized values cause boot failures).
@@ -644,7 +671,9 @@ run_single_test() {
             local _mem_val=${_current_mem//[!0-9]/}
             local _mem_unit=${_current_mem//[0-9]/}
             if [[ "$_mem_unit" == "Mi" && "$_mem_val" -lt 2048 ]] || \
-               [[ "$_mem_unit" == "M" && "$_mem_val" -lt 2048 ]]; then
+               [[ "$_mem_unit" == "M" && "$_mem_val" -lt 2048 ]] || \
+               [[ "$_mem_unit" == "Gi" && "$_mem_val" -lt 2 ]] || \
+               [[ "$_mem_unit" == "G" && "$_mem_val" -lt 2 ]]; then
                 sed -i "s#^vmMemory:.*#vmMemory: \"2Gi\"#" "$temp_vars"
                 logmain DEBUG "[$qualified_name] Auto-increased vmMemory from ${_current_mem} to 2Gi for guestOS=windows"
             fi
@@ -657,10 +686,32 @@ run_single_test() {
             local _mem_val=${_current_mem//[!0-9]/}
             local _mem_unit=${_current_mem//[0-9]/}
             if [[ "$_mem_unit" == "Mi" && "$_mem_val" -lt 2048 ]] || \
-               [[ "$_mem_unit" == "M" && "$_mem_val" -lt 2048 ]]; then
+               [[ "$_mem_unit" == "M" && "$_mem_val" -lt 2048 ]] || \
+               [[ "$_mem_unit" == "Gi" && "$_mem_val" -lt 2 ]] || \
+               [[ "$_mem_unit" == "G" && "$_mem_val" -lt 2 ]]; then
                 sed -i "s#^memory:.*#memory: \"2Gi\"#" "$temp_vars"
                 logmain DEBUG "[$qualified_name] Auto-increased memory from ${_current_mem} to 2Gi for guestOS=windows"
             fi
+        fi
+    fi
+
+    # Auto-clamp cpuSockets/cpuMaxSockets to 64 for Windows (Windows Server 2022 caps
+    # out around 64 sockets; the full profile's 512 causes a 2h boot timeout). Leaves
+    # sanity mode's cpuSockets=1 untouched since it's already below the clamp.
+    if [[ "$_effective_guest_os" == "windows" && -z "${cpuSockets:-}" ]]; then
+        local _current_sockets
+        _current_sockets=$(grep "^cpuSockets:" "$temp_vars" 2>/dev/null | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+        if [[ -n "$_current_sockets" && "$_current_sockets" -gt 64 ]]; then
+            sed -i "s#^cpuSockets:.*#cpuSockets: 64#" "$temp_vars"
+            logmain DEBUG "[$qualified_name] Auto-clamped cpuSockets from ${_current_sockets} to 64 for guestOS=windows"
+        fi
+    fi
+    if [[ "$_effective_guest_os" == "windows" && -z "${cpuMaxSockets:-}" ]]; then
+        local _current_max_sockets
+        _current_max_sockets=$(grep "^cpuMaxSockets:" "$temp_vars" 2>/dev/null | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+        if [[ -n "$_current_max_sockets" && "$_current_max_sockets" -gt 64 ]]; then
+            sed -i "s#^cpuMaxSockets:.*#cpuMaxSockets: 64#" "$temp_vars"
+            logmain DEBUG "[$qualified_name] Auto-clamped cpuMaxSockets from ${_current_max_sockets} to 64 for guestOS=windows"
         fi
     fi
 
@@ -1268,18 +1319,35 @@ main() {
         exit 1
     fi
 
-    # Validate windowsImageUrl when OS includes windows
-    if [[ "$OS_FLAG" == "windows" || "$OS_FLAG" == "both" ]]; then
-        if [[ -z "${windowsImageUrl:-}" ]]; then
-            logerr "--os $OS_FLAG requires windowsImageUrl environment variable"
+    # Expand tests into OS-qualified run list (test_name:os pairs)
+    local qualified_tests=()
+    expand_tests_for_os qualified_tests "${tests_to_run[@]}"
+
+    # Validate windowsImageUrl when OS includes windows: the env var is one way to
+    # supply it, but a scenario's own vars file (e.g. hammerdb-mssql) may already set
+    # it, so only fail for tests that have neither.
+    if [[ -z "${windowsImageUrl:-}" ]]; then
+        local _missing_image_url_tests=()
+        for _qe in "${qualified_tests[@]}"; do
+            local _q_test="${_qe%%:*}"
+            local _q_os="${_qe##*:}"
+            [[ "$_q_os" == "windows" ]] || continue
+            local _q_entry="${TEST_REGISTRY[$_q_test]}"
+            local _q_rel_dir=$(parse_registry "$_q_entry" "dir")
+            local _q_ext=$(parse_registry "$_q_entry" "ext")
+            local _q_test_dir="${SCRIPT_DIR}/${_q_rel_dir}"
+            local _q_vars_file=$(get_vars_file "$_q_test_dir" "$_q_ext")
+            if ! grep -q "^windowsImageUrl:[[:space:]]*[\"']\?[^\"'[:space:]]" "$_q_vars_file" 2>/dev/null; then
+                _missing_image_url_tests+=("$_q_test")
+            fi
+        done
+        if [[ ${#_missing_image_url_tests[@]} -gt 0 ]]; then
+            logerr "windowsImageUrl not set for windows-targeted test(s): ${_missing_image_url_tests[*]}"
+            logerr "Either export windowsImageUrl, or set it directly in that scenario's vars file"
             logerr "Example: windowsImageUrl='http://host:port/image.qcow2' ./run-workloads.sh --os $OS_FLAG ${tests_to_run[*]}"
             exit 1
         fi
     fi
-
-    # Expand tests into OS-qualified run list (test_name:os pairs)
-    local qualified_tests=()
-    expand_tests_for_os qualified_tests "${tests_to_run[@]}"
 
     if [[ ${#qualified_tests[@]} -eq 0 ]]; then
         logerr "No compatible tests for --os $OS_FLAG"

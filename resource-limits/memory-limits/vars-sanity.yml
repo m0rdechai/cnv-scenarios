@@ -19,7 +19,7 @@ storage: "10Gi"
 
 # Storage Configuration
 storageClassName: "ocs-storagecluster-ceph-rbd"
-volumeMode: "Filesystem"
+volumeMode: "Block"
 
 guestOS: linux
 # windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
