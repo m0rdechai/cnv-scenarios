@@ -102,7 +102,7 @@ spec:
       name: dvclone-{{.Replica}}
     spec:
       source:
-{{- if hasPrefix .registryUrl "docker://" }}
+{{- if hasPrefix "docker://" .registryUrl }}
         registry:
           url: {{ .registryUrl }}
 {{- else }}

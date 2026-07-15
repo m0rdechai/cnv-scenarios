@@ -6,7 +6,7 @@ metadata:
   name: {{.name}}
 spec:
   source:
-{{- if hasPrefix .imageUrl "docker://" }}
+{{- if hasPrefix "docker://" .imageUrl }}
     registry:
       url: {{ .imageUrl }}
 {{- else }}
