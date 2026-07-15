@@ -30,8 +30,9 @@ spec:
             secret:
               secretName: "{{ .sshPublicKeySecret }}-{{ .counter }}"
       {{- if .nodeSelector }}
+      {{- $nsParts := splitList "=" .nodeSelector }}
       nodeSelector:
-        {{ .nodeSelector }}
+        {{ index $nsParts 0 }}: {{ index $nsParts 1 }}
       {{- end }}
       domain:
         clock:
