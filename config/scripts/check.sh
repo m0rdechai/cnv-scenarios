@@ -1676,11 +1676,13 @@ check_windows_vm() {
     # SHA-256 of the default fio-3.38-x64.msi asset (verified against the official
     # axboe/fio GitHub release). Only auto-applied when fioUrl is left at its default;
     # if fioUrl is overridden to a different fio version/URL, set fioSha256 explicitly
-    # too, or leave it unset to fall back to log-only (TOFU) verification.
+    # too. Without a matching hash, install is blocked unless allowUnpinnedFioInstall
+    # is explicitly set to true (fail-closed by default).
     local fio_sha256="${cfg[fioSha256]:-}"
     if [[ -z "$fio_sha256" && "$fio_url" == "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi" ]]; then
         fio_sha256="1D450FD538E5EF90A05AAF5BD88E457970CB009832B344AD069D3B3C48BF2C1C"
     fi
+    local allow_unpinned_fio="${cfg[allowUnpinnedFioInstall]:-false}"
     local dir_count="${cfg[dirCount]:-5}"
     local files_per_dir="${cfg[filesPerDir]:-10}"
     local file_size="${cfg[fileSize]:-1G}"
@@ -2167,8 +2169,10 @@ check_windows_vm() {
                     if [[ -n "${fio_sha256}" ]]; then
                         ps_preflight+="if(\$h -ne '${fio_sha256}'){'FIO_DEPLOY_FAILED integrity_mismatch expected=${fio_sha256} actual=' + \$h; Remove-Item \$i -Force -EA SilentlyContinue; exit 1} "
                         ps_preflight+="'FIO_INTEGRITY_OK sha256=' + \$h; "
-                    else
+                    elif [[ "${allow_unpinned_fio}" == "true" ]]; then
                         ps_preflight+="'FIO_INTEGRITY_UNPINNED sha256=' + \$h; "
+                    else
+                        ps_preflight+="'FIO_DEPLOY_FAILED unpinned_install_blocked sha256=' + \$h + ' - set fioSha256 or allowUnpinnedFioInstall=true'; Remove-Item \$i -Force -EA SilentlyContinue; exit 1; "
                     fi
                     ps_preflight+='$p=Start-Process msiexec.exe -ArgumentList "/i `"$i`" /qn /norestart" -Wait -PassThru -NoNewWindow; '
                     ps_preflight+='if($p.ExitCode -ne 0){"FIO_DEPLOY_FAILED msiexec=$($p.ExitCode)"; exit 1} '
@@ -2434,8 +2438,10 @@ check_windows_vm() {
                 local ps_disable_task
                 ps_disable_task='$tasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | '
                 ps_disable_task+="Where-Object { \$_.TaskName -like '*${wait_process_name}*' }); "
-                ps_disable_task+='if ($tasks.Count -gt 0) { $tasks | Disable-ScheduledTask -ErrorAction SilentlyContinue | Out-Null } '
-                ps_disable_task+='Write-Output "DISABLED_COUNT=$($tasks.Count)"'
+                ps_disable_task+='foreach ($t in $tasks) { try { Disable-ScheduledTask -InputObject $t -ErrorAction Stop | Out-Null } catch {} } '
+                ps_disable_task+='$stillEnabled = @($tasks | ForEach-Object { Get-ScheduledTask -TaskName $_.TaskName -TaskPath $_.TaskPath -ErrorAction SilentlyContinue } | Where-Object { $_ -and $_.State -ne "Disabled" }); '
+                ps_disable_task+='Write-Output "MATCHED_COUNT=$($tasks.Count)"; '
+                ps_disable_task+='Write-Output "STILL_ENABLED_COUNT=$($stillEnabled.Count)"'
                 local encoded_disable_task
                 encoded_disable_task=$(printf '%s' "${ps_disable_task}" | iconv -t UTF-16LE | base64 -w 0)
 
@@ -2443,19 +2449,25 @@ check_windows_vm() {
                 disable_task_output=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
                     "powershell.exe -NoProfile -EncodedCommand ${encoded_disable_task}" 2>&1) || true
 
-                local disabled_count
-                disabled_count=$(echo "${disable_task_output}" | grep -oP 'DISABLED_COUNT=\K[0-9]+' || echo "")
+                local matched_count still_enabled_count
+                matched_count=$(echo "${disable_task_output}" | grep -oP 'MATCHED_COUNT=\K[0-9]+' || echo "")
+                still_enabled_count=$(echo "${disable_task_output}" | grep -oP 'STILL_ENABLED_COUNT=\K[0-9]+' || echo "")
 
-                if [ -z "${disabled_count}" ]; then
+                if [ -z "${matched_count}" ] || [ -z "${still_enabled_count}" ]; then
                     echo "    FAIL: Disable scheduled task command failed"
                     echo "    Output: ${disable_task_output}"
                     log_validation_checkpoint "disable_sched_task" "FAIL" "Disable-ScheduledTask command error"
                     validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"FAIL\", \"message\": \"Disable-ScheduledTask command failed for pattern '*${wait_process_name}*'\"}")
                     overall_status="FAILED"
+                elif [ "${still_enabled_count}" -gt 0 ]; then
+                    echo "    FAIL: ${still_enabled_count} of ${matched_count} matched task(s) are still enabled after disable attempt"
+                    log_validation_checkpoint "disable_sched_task" "FAIL" "${still_enabled_count}/${matched_count} task(s) still enabled"
+                    validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"FAIL\", \"message\": \"${still_enabled_count} of ${matched_count} scheduled task(s) matching '*${wait_process_name}*' are still enabled after disable attempt\"}")
+                    overall_status="FAILED"
                 else
-                    echo "    PASS: Disabled ${disabled_count} scheduled task(s) matching '*${wait_process_name}*'"
-                    log_validation_checkpoint "disable_sched_task" "PASS" "Disabled ${disabled_count} task(s)"
-                    validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"PASS\", \"message\": \"Disabled ${disabled_count} scheduled task(s) matching '*${wait_process_name}*'; will not rerun on reboot\"}")
+                    echo "    PASS: Disabled ${matched_count} scheduled task(s) matching '*${wait_process_name}*' (verified)"
+                    log_validation_checkpoint "disable_sched_task" "PASS" "Disabled ${matched_count} task(s), verified"
+                    validations+=("{\"phase\": \"disable_sched_task\", \"status\": \"PASS\", \"message\": \"Disabled ${matched_count} scheduled task(s) matching '*${wait_process_name}*'; verified none are still enabled\"}")
                 fi
             fi
         else
