@@ -52,6 +52,8 @@ disableHammerdbSchedTaskAfterValidation: true
 # FIO data generation — minimal params to exercise the code path in sanity
 fillExtraDisks: true
 fioUrl: "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi"
+fioSha256: ""
+allowUnpinnedFioInstall: false
 dirCount: 1
 filesPerDir: 2
 fileSize: "100M"

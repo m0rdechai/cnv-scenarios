@@ -183,6 +183,17 @@ fillExtraDisks: true
 # for air-gapped environments.
 fioUrl: "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi"
 
+# Expected SHA-256 of the MSI at fioUrl. Leave empty when fioUrl is left at its
+# default -- check.sh auto-applies the known-good hash for that exact URL. If you
+# override fioUrl, set this to the matching hash, or the install is blocked
+# (fail-closed) unless allowUnpinnedFioInstall is also set to true.
+fioSha256: ""
+
+# Allow installing an unverified FIO MSI when fioSha256 is empty and fioUrl is
+# not the pinned default. Defaults to false (fail-closed). Only set true for a
+# custom fioUrl you already trust.
+allowUnpinnedFioInstall: false
+
 # Directory structure per extra disk:
 #   Each disk gets dirCount directories, each containing filesPerDir files of
 #   fileSize each. Per-disk total = dirCount × filesPerDir × fileSize.
