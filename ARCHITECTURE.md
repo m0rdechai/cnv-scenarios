@@ -300,7 +300,7 @@ LONG_WAIT=30         # Seconds between later retries
 | `check_large_disk` | Validates large disk visibility (4 phases) | label_key, label_value, namespace, disk_size, private_key, vm_user, results_dir |
 | `check_high_memory` | Validates high memory allocation with tolerance | label_key, label_value, namespace, memory_size, private_key, vm_user, results_dir |
 | `check_performance_metrics` | Validates CirrOS VMs (password-based SSH) | label_key, label_value, namespace, vm_password, vm_user, results_dir |
-| `check_windows_vm` | 12-phase Windows VM validation via `virtctl ssh` + PowerShell | label_key, label_value, namespace, private_key, vm_user, [key=value …], results_dir |
+| `check_windows_vm` | 12-phase Windows VM validation + 1 optional post-validation phase via `virtctl ssh` + PowerShell | label_key, label_value, namespace, private_key, vm_user, [key=value …], results_dir |
 
 **Validation Flow Example (check_memory_limits):**
 ```
@@ -311,7 +311,7 @@ Phase 4/4: Check memory workload -- stress-ng processes (Linux, 0 = FAIL) or boo
            4 CNV_MEM_BURN=1 workers and verify count + free memory pressure (Windows)
 ```
 
-**Validation Flow: `check_windows_vm` (12 phases + vm_discovery)**
+**Validation Flow: `check_windows_vm` (12 phases + vm_discovery + 1 optional post-validation phase)**
 
 `check_windows_vm` uses a `key=value` argument pattern rather than positional parameters so that new phases can be added without breaking existing callers. All phases after the five fixed positional args (`label_key`, `label_value`, `namespace`, `private_key`, `vm_user`) are parsed from `key=value` pairs; the last argument is always `results_dir`.
 
@@ -329,9 +329,12 @@ Phase 9:  Disk utilization    — used space on non-C: volumes; asserts vs expec
 Phase 10: Post-process util   — polls for waitProcessName exit; asserts disk util vs expectedDiskUtilAfterProcessGB
 Phase 11: FIO data gen        — fills extra disks with high-entropy data via FIO; validates per-drive counts/sizes
 Phase 12: Aggregate disk util — total used space across all non-C: drives; asserts vs expectedTotalDiskUtilGB
+Phase 13 (optional): Disable scheduled task — after all other phases complete, disables any
+                      Scheduled Task matching *waitProcessName* so it will not auto-start on
+                      the next VM reboot; gated on disableHammerdbSchedTaskAfterValidation=true
 ```
 
-Phases 8–10 are gated on Phase 7 (`disk_init_ok` flag). A failed or skipped Phase 7 causes downstream phases to report `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success.
+Phases 8–10 are gated on Phase 7 (`disk_init_ok` flag). A failed or skipped Phase 7 causes downstream phases to report `SKIP`. Phase 11 gates on `fillExtraDisks=true` + `disk_init_ok` + `ssh_ok`. Phase 12 gates on Phase 11 success. Phase 13 runs by default (`disableHammerdbSchedTaskAfterValidation=true`) when `ssh_ok` and a non-empty `waitProcessName` are present; it is independent of Phases 7–12 outcomes. Set `disableHammerdbSchedTaskAfterValidation=false` to leave the scheduled task enabled so HammerDB reruns on every reboot.
 
 **`beforeCleanup` multi-word value encoding**
 
