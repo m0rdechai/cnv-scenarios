@@ -1673,6 +1673,14 @@ check_windows_vm() {
     local expected_disk_util_after_gb="${cfg[expectedDiskUtilAfterProcessGB]:-0}"
     local fill_extra_disks="${cfg[fillExtraDisks]:-false}"
     local fio_url="${cfg[fioUrl]:-https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi}"
+    # SHA-256 of the default fio-3.38-x64.msi asset (verified against the official
+    # axboe/fio GitHub release). Only auto-applied when fioUrl is left at its default;
+    # if fioUrl is overridden to a different fio version/URL, set fioSha256 explicitly
+    # too, or leave it unset to fall back to log-only (TOFU) verification.
+    local fio_sha256="${cfg[fioSha256]:-}"
+    if [[ -z "$fio_sha256" && "$fio_url" == "https://github.com/axboe/fio/releases/download/fio-3.38/fio-3.38-x64.msi" ]]; then
+        fio_sha256="1D450FD538E5EF90A05AAF5BD88E457970CB009832B344AD069D3B3C48BF2C1C"
+    fi
     local dir_count="${cfg[dirCount]:-5}"
     local files_per_dir="${cfg[filesPerDir]:-10}"
     local file_size="${cfg[fileSize]:-1G}"
@@ -2154,6 +2162,13 @@ check_windows_vm() {
                     ps_preflight+='[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; '
                     ps_preflight+='$i="$env:TEMP\fio.msi"; '
                     ps_preflight+="Invoke-WebRequest -Uri '${fio_url}' -OutFile \$i -UseBasicParsing -TimeoutSec 120; "
+                    ps_preflight+='$h=(Get-FileHash -Path $i -Algorithm SHA256).Hash; '
+                    if [[ -n "${fio_sha256}" ]]; then
+                        ps_preflight+="if(\$h -ne '${fio_sha256}'){'FIO_DEPLOY_FAILED integrity_mismatch expected=${fio_sha256} actual=' + \$h; Remove-Item \$i -Force -EA SilentlyContinue; exit 1} "
+                        ps_preflight+="'FIO_INTEGRITY_OK sha256=' + \$h; "
+                    else
+                        ps_preflight+="'FIO_INTEGRITY_UNPINNED sha256=' + \$h; "
+                    fi
                     ps_preflight+='$p=Start-Process msiexec.exe -ArgumentList "/i `"$i`" /qn /norestart" -Wait -PassThru -NoNewWindow; '
                     ps_preflight+='if($p.ExitCode -ne 0){"FIO_DEPLOY_FAILED msiexec=$($p.ExitCode)"; exit 1} '
                     ps_preflight+='$env:PATH+=";C:\Program Files\fio"; '

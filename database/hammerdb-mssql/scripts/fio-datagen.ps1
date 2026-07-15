@@ -14,6 +14,9 @@
 #   $FileSize         filesize (e.g. 1G, 100M)
 #   $DepthCount       directory nesting depth
 #   $FioUrl           MSI download URL for runtime install
+#   $FioSha256        Expected SHA-256 of the MSI at $FioUrl. Defaults to the known-good
+#                      hash for the default fio-3.38-x64.msi release asset. Update this
+#                      (or blank it to fall back to log-only/TOFU) if you override $FioUrl.
 #   $ExcludeDrives    Array of drive letters to skip (e.g. C,D)
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +27,7 @@ $FilesPerDir     = [int]'__FILES_PER_DIR__'
 $FileSize        = '__FILE_SIZE__'
 $DepthCount      = [int]'__DEPTH_COUNT__'
 $FioUrl          = '__FIO_URL__'
+$FioSha256       = '1D450FD538E5EF90A05AAF5BD88E457970CB009832B344AD069D3B3C48BF2C1C'
 $ExcludeDrives   = @('__EXCLUDE_DRIVES__' -split ',')
 
 $DirPrefix  = 'fio_data_dir_'
@@ -64,6 +68,19 @@ if ($Mode -eq 'preflight') {
         $installer = "$env:TEMP\fio-install.msi"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $FioUrl -OutFile $installer -UseBasicParsing -TimeoutSec 120
+
+        $actualHash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
+        if ($FioSha256) {
+            if ($actualHash -ne $FioSha256.ToUpper()) {
+                Write-Output "FIO_DEPLOY_FAILED integrity_check_failed expected=$FioSha256 actual=$actualHash"
+                Remove-Item $installer -Force -ErrorAction SilentlyContinue
+                exit 1
+            }
+            Write-Output "FIO_INTEGRITY_OK sha256=$actualHash"
+        } else {
+            Write-Output "FIO_INTEGRITY_UNPINNED sha256=$actualHash - pin this as `$FioSha256 if this URL is trusted"
+        }
+
         $proc = Start-Process msiexec.exe -ArgumentList "/i `"$installer`" /qn /norestart" -Wait -PassThru -NoNewWindow
         if ($proc.ExitCode -ne 0) {
             Write-Output "FIO_DEPLOY_FAILED msiexec_exit=$($proc.ExitCode)"
