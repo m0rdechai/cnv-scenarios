@@ -15,20 +15,24 @@
 #   $DepthCount       directory nesting depth
 #   $FioUrl           MSI download URL for runtime install
 #   $FioSha256        Expected SHA-256 of the MSI at $FioUrl. Defaults to the known-good
-#                      hash for the default fio-3.38-x64.msi release asset. Update this
-#                      (or blank it to fall back to log-only/TOFU) if you override $FioUrl.
+#                      hash for the default fio-3.38-x64.msi release asset. Update this if
+#                      you override $FioUrl. If blank, install is blocked unless
+#                      $AllowUnpinnedFioInstall is set to $true (fail-closed by default).
+#   $AllowUnpinnedFioInstall  Allow installing an unverified MSI when $FioSha256 is blank.
+#                      Defaults to $false.
 #   $ExcludeDrives    Array of drive letters to skip (e.g. C,D)
 
 $ErrorActionPreference = 'Stop'
 
-$Mode            = '__MODE__'
-$DirectoryCount  = [int]'__DIR_COUNT__'
-$FilesPerDir     = [int]'__FILES_PER_DIR__'
-$FileSize        = '__FILE_SIZE__'
-$DepthCount      = [int]'__DEPTH_COUNT__'
-$FioUrl          = '__FIO_URL__'
-$FioSha256       = '1D450FD538E5EF90A05AAF5BD88E457970CB009832B344AD069D3B3C48BF2C1C'
-$ExcludeDrives   = @('__EXCLUDE_DRIVES__' -split ',')
+$Mode                     = '__MODE__'
+$DirectoryCount           = [int]'__DIR_COUNT__'
+$FilesPerDir              = [int]'__FILES_PER_DIR__'
+$FileSize                 = '__FILE_SIZE__'
+$DepthCount               = [int]'__DEPTH_COUNT__'
+$FioUrl                   = '__FIO_URL__'
+$FioSha256                = '1D450FD538E5EF90A05AAF5BD88E457970CB009832B344AD069D3B3C48BF2C1C'
+$AllowUnpinnedFioInstall  = $false
+$ExcludeDrives            = @('__EXCLUDE_DRIVES__' -split ',')
 
 $DirPrefix  = 'fio_data_dir_'
 $FilePrefix = 'bench_file_'
@@ -77,8 +81,12 @@ if ($Mode -eq 'preflight') {
                 exit 1
             }
             Write-Output "FIO_INTEGRITY_OK sha256=$actualHash"
-        } else {
+        } elseif ($AllowUnpinnedFioInstall) {
             Write-Output "FIO_INTEGRITY_UNPINNED sha256=$actualHash - pin this as `$FioSha256 if this URL is trusted"
+        } else {
+            Write-Output "FIO_DEPLOY_FAILED unpinned_install_blocked sha256=$actualHash - set `$FioSha256 or `$AllowUnpinnedFioInstall = `$true"
+            Remove-Item $installer -Force -ErrorAction SilentlyContinue
+            exit 1
         }
 
         $proc = Start-Process msiexec.exe -ArgumentList "/i `"$installer`" /qn /norestart" -Wait -PassThru -NoNewWindow
