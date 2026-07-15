@@ -32,7 +32,7 @@ spec:
       {{- if .nodeSelector }}
       {{- $nsParts := splitList "=" .nodeSelector }}
       nodeSelector:
-        {{ index $nsParts 0 }}: {{ index $nsParts 1 }}
+        {{ index $nsParts 0 | quote }}: {{ index $nsParts 1 | quote }}
       {{- end }}
       domain:
         clock:
