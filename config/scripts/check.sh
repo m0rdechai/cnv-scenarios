@@ -394,6 +394,7 @@ check_cpu_limits() {
     # Track validation status for JSON report
     local guest_os_validation_status="SKIP"
     local stress_ng_validation_status="SKIP"
+    local spec_status="PASS"
     local overall_status="SUCCESS"
 
 
@@ -418,6 +419,7 @@ check_cpu_limits() {
         if [ "${actual_cpu}" != "${expected_cpu}" ]; then
             echo "  ✗ ${vm}: vCPU count mismatch. Expected: ${expected_cpu}, Actual: ${actual_cpu} (cores=${spec_cores} * sockets=${spec_sockets})"
             log_validation_checkpoint "vm_spec_cpu_count" "FAIL" "Expected ${expected_cpu}, got ${actual_cpu} (${spec_cores}c x ${spec_sockets}s)"
+            spec_status="FAIL"
             overall_status="FAILED"
             break
         fi
@@ -491,7 +493,7 @@ check_cpu_limits() {
             # shellcheck disable=SC2016
             ps_script='$n = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors; '
             ps_script+='$workerCmd = "powershell.exe -NoProfile -Command `$env:CNV_CPU_BURN=1; [double]`$x=1; while(`$true){`$x=[math]::Sqrt(`$x+1)}"; '
-            ps_script+='1..$n | ForEach-Object { [void](Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}) }; '
+            ps_script+='1..$n | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
             ps_script+='"STARTED=$n"'
             local encoded_bootstrap
             encoded_bootstrap=$(printf '%s' "${ps_script}" | iconv -t UTF-16LE | base64 -w 0)
@@ -605,8 +607,8 @@ PARAMS
     )
 
     # Generate validations JSON using actual tracked status
-    local spec_status="PASS"
-    [ "${overall_status}" = "FAILED" ] && spec_status="FAIL"
+    local spec_memory_status="PASS"
+    # spec_memory_status is tracked independently in Phase 2
 
     local guest_os_msg
     local stress_ng_msg
@@ -704,6 +706,7 @@ check_memory_limits() {
         if [ "${actual_memory}" != "${expected_memory}" ]; then
             echo "  ✗ ${vm}: Memory mismatch. Expected: ${expected_memory}, Actual: ${actual_memory}"
             log_validation_checkpoint "vm_spec_memory" "FAIL" "Expected ${expected_memory}, got ${actual_memory}"
+            spec_memory_status="FAIL"
             overall_status="FAILED"
             break
         fi
@@ -811,7 +814,7 @@ check_memory_limits() {
             # Minimum 32MB per worker to be meaningful
             [ "${per_worker_mb}" -lt 32 ] && per_worker_mb=32
 
-            echo "  Memory budget: ${stress_total_mb}MB total (90% of ${expected_memory}), ${per_worker_mb}MB per worker, ${expected_workers} workers"
+            echo "  Memory budget (from spec): ${stress_total_mb}MB total (90% of ${expected_memory}), ${per_worker_mb}MB per worker, ${expected_workers} workers"
 
             # Build bootstrap script: each worker allocates a byte array and touches every page in a loop.
             # Uses CNV_MEM_BURN=1 environment marker for process identification.
@@ -826,7 +829,7 @@ check_memory_limits() {
             ps_script+='`$rng.NextBytes(`$buf); '
             ps_script+='for(`$i=0;`$i -lt `$buf.Length;`$i+=4096){`$buf[`$i]=[byte](`$buf[`$i] -bxor 0xFF)} '
             ps_script+='}"; '
-            ps_script+='1..$workers | ForEach-Object { [void](Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}) }; '
+            ps_script+='1..$workers | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
             ps_script+='"STARTED=$workers"'
 
             local encoded_bootstrap
@@ -847,7 +850,8 @@ check_memory_limits() {
                     continue
                 fi
 
-                # Capture free memory before bootstrap for pressure validation
+                # Query actual free memory and recalculate allocation for Windows.
+                # Windows OS overhead (~1.4GB) makes spec-based allocation impossible.
                 local free_mem_before
                 free_mem_before=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
                     "${windows_guest_free_memory_mb_cmd}" 2>/dev/null || echo "0")
@@ -855,9 +859,25 @@ check_memory_limits() {
                 free_mem_before=${free_mem_before:-0}
                 echo "    Free memory before bootstrap: ${free_mem_before}MB"
 
+                # Use 75% of actual free memory instead of spec-based calculation
+                local actual_per_worker_mb=$((free_mem_before * 75 / 100 / expected_workers))
+                [ "${actual_per_worker_mb}" -lt 32 ] && actual_per_worker_mb=32
+                echo "    Adjusted per-worker allocation: ${actual_per_worker_mb}MB (75% of ${free_mem_before}MB / ${expected_workers} workers)"
+
+                # Rebuild the bootstrap script with adjusted per-worker memory.
+                # Script kept short to fit within virtctl ssh exec channel limits (~1000 chars encoded).
+                local adj_ps_script
+                # shellcheck disable=SC2016
+                adj_ps_script='$sz = '${actual_per_worker_mb}' * 1048576; '
+                adj_ps_script+='$cmd = "powershell.exe -NoProfile -Command `$env:CNV_MEM_BURN=1; [long]`$s=$sz; `$b = New-Object byte[] `$s; while(`$true){Start-Sleep 10}"; '
+                adj_ps_script+='1..'${expected_workers}' | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$cmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
+                adj_ps_script+='"STARTED='${expected_workers}'"'
+                local adj_encoded_bootstrap
+                adj_encoded_bootstrap=$(printf '%s' "${adj_ps_script}" | iconv -t UTF-16LE | base64 -w 0)
+
                 local bootstrap_result
                 bootstrap_result=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                    "powershell.exe -NoProfile -EncodedCommand ${encoded_bootstrap}" 2>/dev/null || echo "BOOTSTRAP_FAILED")
+                    "powershell.exe -NoProfile -EncodedCommand ${adj_encoded_bootstrap}" 2>/dev/null || echo "BOOTSTRAP_FAILED")
                 echo "    Result: ${bootstrap_result}"
             done
 
@@ -956,15 +976,15 @@ PARAMS
     )
 
     # Generate validations JSON
-    local spec_status="PASS"
-    [ "${overall_status}" = "FAILED" ] && spec_status="FAIL"
+    local spec_memory_status="PASS"
+    # spec_memory_status is tracked independently in Phase 2
 
     local validations_json
     validations_json=$(
         cat <<VALIDATIONS
 [
     {"phase": "vm_discovery", "status": "PASS", "message": "Found ${vm_count} VMs"},
-    {"phase": "vm_spec_memory", "status": "${spec_status}", "message": "VM spec memory validation (${expected_memory})"},
+    {"phase": "vm_spec_memory", "status": "${spec_memory_status}", "message": "VM spec memory validation (${expected_memory})"},
     {"phase": "guest_os_memory", "status": "${guest_os_validation_status}", "message": "Guest OS memory validation"},
     {"phase": "stress_ng_processes", "status": "${stress_ng_validation_status}", "message": "stress-ng memory stress test validation"}
 ]
@@ -1027,6 +1047,7 @@ check_disk_limits() {
     log_validation_checkpoint "vm_discovery" "PASS" "Found VMs: ${vms}"
 
     local overall_status="SUCCESS"
+    local spec_status="PASS"
     local guest_os_disk_count_status="SKIP"
     local guest_os_disk_size_status="SKIP"
 
@@ -1042,6 +1063,7 @@ check_disk_limits() {
         if [ "${actual_disk_count}" != "${expected_disk_count}" ]; then
             echo "  ✗ ${vm}: Disk count mismatch. Expected: ${expected_disk_count}, Actual: ${actual_disk_count}"
             log_validation_checkpoint "vm_spec_disk_count" "FAIL" "Expected ${expected_disk_count}, got ${actual_disk_count}"
+            spec_status="FAIL"
             overall_status="FAILED"
             break
         fi
@@ -1063,6 +1085,7 @@ check_disk_limits() {
                 if [ "${dv_size}" != "${expected_disk_size}" ]; then
                     echo "  ✗ ${vm}: Disk size mismatch. Expected: ${expected_disk_size}, Actual: ${dv_size}"
                     log_validation_checkpoint "vm_spec_disk_size" "FAIL" "Expected ${expected_disk_size}, got ${dv_size}"
+                    spec_status="FAIL"
                     overall_status="FAILED"
                     break 2
                 fi
@@ -1233,8 +1256,8 @@ PARAMS
     )
 
     # Generate validations JSON
-    local spec_status="PASS"
-    [ "${overall_status}" = "FAILED" ] && spec_status="FAIL"
+    local spec_memory_status="PASS"
+    # spec_memory_status is tracked independently in Phase 2
 
     local validations_json
     validations_json=$(

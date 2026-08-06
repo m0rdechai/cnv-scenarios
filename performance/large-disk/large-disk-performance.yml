@@ -83,7 +83,7 @@ jobs:
       registryUrl: "{{ .windowsImageUrl }}"
       cpuCores: {{ .cpuCores | default 16 }}
       memory: {{ .memory | default "32Gi" }}
-      rootStorage: {{ .windowsRootDiskSize | default "90Gi" }}
+      rootStorage: {{ .windowsRootDiskSize | default "100Gi" }}
       dataStorage: {{ .largeDiskSize | default "100Ti" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: Block

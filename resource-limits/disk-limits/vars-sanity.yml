@@ -13,7 +13,7 @@ vmCount: 1
 # Disk Configuration (minimal)
 diskCount: 2
 diskSize: "1Gi"
-windowsRootDiskSize: "90Gi"
+windowsRootDiskSize: "100Gi"
 
 # Resource Configuration (minimal)
 cpuCores: 1
@@ -25,7 +25,7 @@ storageClassName: "ocs-storagecluster-ceph-rbd"
 volumeMode: "Filesystem"
 
 guestOS: linux
-# windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
 
 # VM Image Configuration
 imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"

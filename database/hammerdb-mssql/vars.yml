@@ -46,7 +46,7 @@ cpuCores: 8
 memory: "16Gi"
 
 # Size of the root (OS) DataVolume. Must be large enough for Windows + MSSQL.
-rootStorage: "80Gi"
+rootStorage: "100Gi"
 
 # Number of additional data DataVolumes attached to each VM (excludes root disk).
 # Each disk is provisioned as a blank Block-mode PVC and initialized inside the
@@ -67,7 +67,7 @@ volumeMode: "Block"
 # REQUIRED: CDI source URL for the Windows + MSSQL + HammerDB container disk.
 # Use "docker://registry/image:tag" for container registries or
 # "http(s)://host/path.qcow2" for HTTP import. See docs/windows-image-build.md.
-# windowsImageUrl: "docker://…"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
 
 # ─── Access Credentials ─────────────────────────────────────────────────────
 

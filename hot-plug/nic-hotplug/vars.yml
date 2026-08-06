@@ -40,8 +40,8 @@ osType: "rhel9"                            # OS type label for VM template
 
 # Guest OS Configuration (Linux or Windows)
 guestOS: "linux"                           # Set to "windows" for Windows VM testing
-# windowsImageUrl: "docker://your-registry/windows-image:latest"  # Windows image URL (docker:// or http(s)://)
-windowsRootDiskSize: "90Gi"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
+windowsRootDiskSize: "100Gi"
 
 # Storage Configuration
 storage: "50Gi"                            # Storage size for VM disk
