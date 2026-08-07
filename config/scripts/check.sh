@@ -487,17 +487,6 @@ check_cpu_limits() {
         if [ "${guest_os}" = "windows" ]; then
             echo "[Phase 4/4] Bootstrapping and checking Windows CPU burn workers (CNV_CPU_BURN=1)..."
 
-            # Build the bootstrap script and encode it as base64 UTF-16LE
-            # to use powershell -EncodedCommand, bypassing all SSH quoting issues.
-            local ps_script
-            # shellcheck disable=SC2016
-            ps_script='$n = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors; '
-            ps_script+='$workerCmd = "powershell.exe -NoProfile -Command `$env:CNV_CPU_BURN=1; [double]`$x=1; while(`$true){`$x=[math]::Sqrt(`$x+1)}"; '
-            ps_script+='1..$n | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
-            ps_script+='"STARTED=$n"'
-            local encoded_bootstrap
-            encoded_bootstrap=$(printf '%s' "${ps_script}" | iconv -t UTF-16LE | base64 -w 0)
-
             for vm in ${vms}; do
                 echo "  Bootstrapping CPU burn workers on ${vm}..."
 
@@ -511,6 +500,22 @@ check_cpu_limits() {
                     echo "    Already running ${existing_count} worker(s), skipping bootstrap"
                     continue
                 fi
+
+                # Start only the missing workers. A retry against a partial worker
+                # set (existing_count > 0) must not relaunch the full expected_cpu
+                # count, or the final total overshoots expected_cpu and Phase 4
+                # fails on the exact-count check below.
+                local workers_to_start=$((expected_cpu - existing_count))
+
+                # Build the bootstrap script and encode it as base64 UTF-16LE
+                # to use powershell -EncodedCommand, bypassing all SSH quoting issues.
+                local ps_script
+                # shellcheck disable=SC2016
+                ps_script='$workerCmd = "powershell.exe -NoProfile -Command `$env:CNV_CPU_BURN=1; [double]`$x=1; while(`$true){`$x=[math]::Sqrt(`$x+1)}"; '
+                ps_script+='1..'${workers_to_start}' | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$workerCmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
+                ps_script+='"STARTED='${workers_to_start}'"'
+                local encoded_bootstrap
+                encoded_bootstrap=$(printf '%s' "${ps_script}" | iconv -t UTF-16LE | base64 -w 0)
 
                 local bootstrap_result
                 bootstrap_result=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
@@ -691,6 +696,7 @@ check_memory_limits() {
     log_validation_checkpoint "vm_discovery" "PASS" "Found VMs: ${vms}"
 
     local overall_status="SUCCESS"
+    local spec_memory_status="PASS"
     local guest_os_validation_status="SKIP"
     local stress_ng_validation_status="SKIP"
 
@@ -850,19 +856,41 @@ check_memory_limits() {
                     continue
                 fi
 
+                # Start only the missing workers. A retry against a partial worker
+                # set must not relaunch the full expected_workers count, or the
+                # final total overshoots expected_workers and the exact-count
+                # check below fails.
+                local workers_to_start=$((expected_workers - existing_count))
+
                 # Query actual free memory and recalculate allocation for Windows.
                 # Windows OS overhead (~1.4GB) makes spec-based allocation impossible.
                 local free_mem_before
                 free_mem_before=$(remote_command "${namespace}" "${private_key}" "${vm_user}" "${vm}" \
-                    "${windows_guest_free_memory_mb_cmd}" 2>/dev/null || echo "0")
+                    "${windows_guest_free_memory_mb_cmd}" 2>/dev/null || echo "")
                 free_mem_before=$(echo "${free_mem_before}" | head -1 | tr -cd '0-9')
-                free_mem_before=${free_mem_before:-0}
+
+                if [ -z "${free_mem_before}" ] || [ "${free_mem_before}" -le 0 ]; then
+                    echo "  ✗ ${vm}: Failed to query guest free memory (empty or non-positive result)"
+                    log_validation_checkpoint "stress_ng_processes" "FAIL" "Could not determine guest free memory for worker sizing"
+                    overall_status="FAILED"
+                    break
+                fi
                 echo "    Free memory before bootstrap: ${free_mem_before}MB"
 
-                # Use 75% of actual free memory instead of spec-based calculation
-                local actual_per_worker_mb=$((free_mem_before * 75 / 100 / expected_workers))
-                [ "${actual_per_worker_mb}" -lt 32 ] && actual_per_worker_mb=32
-                echo "    Adjusted per-worker allocation: ${actual_per_worker_mb}MB (75% of ${free_mem_before}MB / ${expected_workers} workers)"
+                # Use 75% of actual free memory instead of spec-based calculation.
+                # Fail closed instead of forcing a meaningless 32MB-per-worker
+                # allocation when the budget can't actually support the workers —
+                # that would silently turn into a no-op "memory stress" test.
+                local mem_budget_mb=$((free_mem_before * 75 / 100))
+                local actual_per_worker_mb=$((mem_budget_mb / workers_to_start))
+
+                if [ "${actual_per_worker_mb}" -lt 32 ]; then
+                    echo "  ✗ ${vm}: Insufficient free memory for worker sizing — ${mem_budget_mb}MB budget / ${workers_to_start} workers = ${actual_per_worker_mb}MB (< 32MB minimum)"
+                    log_validation_checkpoint "stress_ng_processes" "FAIL" "Insufficient free memory: ${mem_budget_mb}MB / ${workers_to_start} workers = ${actual_per_worker_mb}MB (< 32MB min)"
+                    overall_status="FAILED"
+                    break
+                fi
+                echo "    Adjusted per-worker allocation: ${actual_per_worker_mb}MB (75% of ${free_mem_before}MB / ${workers_to_start} workers)"
 
                 # Rebuild the bootstrap script with adjusted per-worker memory.
                 # Script kept short to fit within virtctl ssh exec channel limits (~1000 chars encoded).
@@ -870,8 +898,8 @@ check_memory_limits() {
                 # shellcheck disable=SC2016
                 adj_ps_script='$sz = '${actual_per_worker_mb}' * 1048576; '
                 adj_ps_script+='$cmd = "powershell.exe -NoProfile -Command `$env:CNV_MEM_BURN=1; [long]`$s=$sz; `$b = New-Object byte[] `$s; while(`$true){Start-Sleep 10}"; '
-                adj_ps_script+='1..'${expected_workers}' | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$cmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
-                adj_ps_script+='"STARTED='${expected_workers}'"'
+                adj_ps_script+='1..'${workers_to_start}' | ForEach-Object { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$cmd}; if($r.ReturnValue -ne 0){"WORKER_FAIL:rc=$($r.ReturnValue)"} }; '
+                adj_ps_script+='"STARTED='${workers_to_start}'"'
                 local adj_encoded_bootstrap
                 adj_encoded_bootstrap=$(printf '%s' "${adj_ps_script}" | iconv -t UTF-16LE | base64 -w 0)
 
@@ -975,10 +1003,7 @@ check_memory_limits() {
 PARAMS
     )
 
-    # Generate validations JSON
-    local spec_memory_status="PASS"
-    # spec_memory_status is tracked independently in Phase 2
-
+    # Generate validations JSON (spec_memory_status is set in Phase 2 above)
     local validations_json
     validations_json=$(
         cat <<VALIDATIONS

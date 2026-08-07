@@ -104,6 +104,7 @@ spec:
     http:
       url: "http://your-host:9002/winmssql2022.qcow2"
   storage:
+    volumeMode: Block
     resources:
       requests:
         storage: 100Gi
