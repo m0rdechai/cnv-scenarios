@@ -40,7 +40,13 @@ args=("$@")
 # Get the number of arguments
 num_args=${#args[@]}
 # Get the last argument (results directory)
-results_dir="${args[$((num_args-1))]}"
+# Determine results_dir: if last arg looks like a guest OS, use second-to-last
+last_arg="${args[$((num_args-1))]}"
+if [[ "$last_arg" == "linux" || "$last_arg" == "windows" ]]; then
+    results_dir="${args[$((num_args-2))]}"
+else
+    results_dir="${args[$((num_args-1))]}"
+fi
 
 # Ensure the results directory exists (may already exist from kube-burner)
 mkdir -p "${results_dir}"

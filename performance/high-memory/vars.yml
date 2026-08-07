@@ -44,8 +44,8 @@ osType: "rhel9"                            # Operating system type
 
 # Guest OS Configuration (Linux or Windows)
 guestOS: "linux"                           # Set to "windows" for Windows VM testing
-# windowsImageUrl: "docker://your-registry/windows-image:latest"  # Windows image URL (docker:// or http(s)://)
-windowsRootDiskSize: "90Gi"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
+windowsRootDiskSize: "100Gi"
 
 # Performance Test Configuration
 enablePerfTest: true                       # Enable memory performance test script in VM

@@ -86,6 +86,55 @@ windowsImageUrl='http://host:9002/win.qcow2' ./run-workloads.sh cpu-limits --mod
 windowsImageUrl='http://host:9002/win.qcow2' ./run-workloads.sh --all --mode sanity --os both --parallel
 ```
 
+### Windows Golden PVC (Fast Cloning)
+
+Importing a Windows QCOW2 image over HTTP takes ~35 minutes per test. To speed this up,
+pre-import the image once as a golden PVC, then clone from it (~40 seconds per test).
+
+**1. Create the golden DataVolume (one-time):**
+
+```yaml
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: windows-golden
+  namespace: openshift-virtualization-os-images
+spec:
+  source:
+    http:
+      url: "http://your-host:9002/winmssql2022.qcow2"
+  storage:
+    resources:
+      requests:
+        storage: 100Gi
+```
+
+```bash
+oc apply -f golden-dv.yaml
+# Wait for import to complete (~35 min, one time only)
+oc get dv windows-golden -n openshift-virtualization-os-images -w
+```
+
+**2. Run tests using the golden PVC:**
+
+```bash
+windowsImageUrl='pvc://openshift-virtualization-os-images/windows-golden' \
+  ./run-workloads.sh cpu-limits --mode sanity --os windows
+```
+
+The templates detect the `pvc://` prefix and switch the DataVolume source from HTTP import
+to local PVC clone (dataSource). The golden PVC must be at least as large as the
+`windowsRootDiskSize` in the scenario vars (default: 100Gi).
+
+**3. Updating the golden image:**
+
+When a new QCOW2 image is available, delete and recreate the DataVolume:
+
+```bash
+oc delete dv windows-golden -n openshift-virtualization-os-images
+# Re-apply the YAML with the updated URL, then wait for import
+```
+
 Results are automatically saved to timestamped directories:
 ```
 /tmp/kube-burner-results/<test-name>/run-YYYYMMDD-HHMMSS/

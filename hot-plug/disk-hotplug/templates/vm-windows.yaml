@@ -99,6 +99,11 @@ spec:
 {{- if hasPrefix "docker://" .registryUrl }}
         registry:
           url: {{ .registryUrl }}
+{{- else if hasPrefix "pvc://" .registryUrl }}
+{{- $pvcParts := splitList "/" (trimPrefix "pvc://" .registryUrl) }}
+        pvc:
+          namespace: {{ index $pvcParts 0 }}
+          name: {{ index $pvcParts 1 }}
 {{- else }}
         http:
           url: {{ .registryUrl }}

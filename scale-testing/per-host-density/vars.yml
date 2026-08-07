@@ -114,5 +114,5 @@ imageUrl: "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud/generic_al
 
 # Guest OS Configuration (Linux or Windows)
 guestOS: "linux"                           # Set to "windows" for Windows VM testing
-# windowsImageUrl: "docker://your-registry/windows-image:latest"  # Windows image URL (docker:// or http(s)://)
-windowsRootDiskSize: "90Gi"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
+windowsRootDiskSize: "100Gi"

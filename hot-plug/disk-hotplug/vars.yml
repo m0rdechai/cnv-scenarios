@@ -44,8 +44,8 @@ storageClassName: "ocs-storagecluster-ceph-rbd"  # Storage class for PVC provisi
 volumeMode: "Block"                        # Volume mode (Block or Filesystem)
 
 guestOS: linux
-# windowsImageUrl: "docker://…" or "http(s)://…/disk.qcow2"
-windowsRootDiskSize: "90Gi"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
+windowsRootDiskSize: "100Gi"
 
 # VM Image Configuration
 imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"  # Fedora cloud image URL

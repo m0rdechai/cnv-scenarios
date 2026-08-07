@@ -9,6 +9,11 @@ spec:
 {{- if hasPrefix "docker://" .imageUrl }}
     registry:
       url: {{ .imageUrl }}
+{{- else if hasPrefix "pvc://" .imageUrl }}
+{{- $pvcParts := splitList "/" (trimPrefix "pvc://" .imageUrl) }}
+    pvc:
+      namespace: {{ index $pvcParts 0 }}
+      name: {{ index $pvcParts 1 }}
 {{- else }}
     http:
         url: {{.imageUrl}}

@@ -96,7 +96,7 @@ jobs:
       vmUser: {{ .vmUser | default "Administrator" }}
       registryUrl: "{{ .windowsImageUrl }}"
       nodeSelector: {{ .nodeSelector | default "" }}
-      storage: {{ .windowsRootDiskSize | default "90Gi" }}
+      storage: {{ .windowsRootDiskSize | default "100Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: {{ .volumeMode | default "Block" }}
       DISK_COUNT: {{ $diskCount }}

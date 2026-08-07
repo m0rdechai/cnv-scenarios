@@ -91,7 +91,7 @@ jobs:
       cpuCores: {{ .cpuCores | default 16 }}
       memory: {{ .memory | default "32Gi" }}
       diskCount: {{ .diskCount | default 1 }}
-      rootStorage: {{ .windowsRootDiskSize | default "90Gi" }}
+      rootStorage: {{ .windowsRootDiskSize | default "100Gi" }}
       storage: {{ .diskSize | default "10Gi" }}
       storageclass: {{ .storageClassName | default "ocs-storagecluster-ceph-rbd" }}
       volumemode: {{ .volumeMode | default "Block" }}

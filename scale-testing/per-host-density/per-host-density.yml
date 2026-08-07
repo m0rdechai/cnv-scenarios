@@ -7,7 +7,7 @@
 {{- $sshPublicKeySecretName := $testName -}}
 {{- $sourceStorageSizeStr := (list (.sourceStorageSize | toString) "Mi") | join "" -}}
 {{- $vmStorageSizeStr := (list (.vmStorageSize | toString) "Mi") | join "" -}}
-{{- $windowsVmStorageSizeStr := .windowsRootDiskSize | default "90Gi" -}}
+{{- $windowsVmStorageSizeStr := .windowsRootDiskSize | default "100Gi" -}}
 {{- $jobCounterLabelKey := (list $testName "." $kubeBurnerFQDN "/counter") | join "" -}}
 {{- $jobCounterLabelValue := (list "counter-" (.counter | toString )) | join "" -}}
 {{- $testNamespacesLabelKey := (list $kubeBurnerFQDN "/test-name") | join "" -}}
@@ -112,7 +112,7 @@ jobs:
   cleanup: false
   # Set missing key as empty to allow using default values
   defaultMissingKeysWithZero: true
-  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }} {{ .UUID }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
   objects:
   - objectTemplate: templates/ssh-secret.yml
     runOnce: true
@@ -179,12 +179,11 @@ jobs:
   maxWaitTimeout: 30m
   objectDelay: 10s
   objectWait: true
-  beforeCleanup: "config/scripts/check.sh check_vm_shutdown {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .UUID }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_shutdown {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }}"
   objects:
   - kubeVirtOp: stop
     labelSelector:
       {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
-      kube-burner.io/uuid: {{ .UUID }}
 
 # Sleep between phases
 - name: sleep-between-phases
@@ -217,10 +216,9 @@ jobs:
   maxWaitTimeout: {{ .maxWaitTimeout }}
   objectDelay: 1s
   objectWait: true
-  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }} {{ .UUID }}"
+  beforeCleanup: "config/scripts/check.sh check_vm_running {{ $jobCounterLabelKey }} {{ $jobCounterLabelValue }} all {{ .privateKey }} {{ .vmUser }} {{ .percentage_of_vms_to_validate | default 25 }} {{ .max_ssh_retries | default 8 }} {{ .resultsPath }}/{{ .runTimestamp }}/iteration-{{ .counter }} {{ .guestOS | default "linux" }}"
   objects:
   - kubeVirtOp: start
     labelSelector:
       {{ $jobCounterLabelKey }}: {{ $jobCounterLabelValue }}
-      kube-burner.io/uuid: {{ .UUID }}
 {{ end }}

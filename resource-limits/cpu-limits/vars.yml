@@ -45,8 +45,8 @@ volumeMode: "Block"
 # Guest OS: linux (default) or windows — see docs/windows-image-build.md
 guestOS: linux
 # When guestOS is windows, set windowsImageUrl: docker://… (container disk) or http(s)://…/.qcow2 (CDI HTTP import)
-# windowsImageUrl: ""
-windowsRootDiskSize: "90Gi"
+windowsImageUrl: "pvc://openshift-virtualization-os-images/windows-golden"
+windowsRootDiskSize: "100Gi"
 
 # VM Image Configuration (Linux)
 imageUrl: "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"  # Fedora cloud image URL
