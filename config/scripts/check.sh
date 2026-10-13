@@ -2200,6 +2200,14 @@ check_windows_vm() {
             elif [ "${ssh_ok}" != "true" ]; then
                 echo "  [11/12] FIO data generation... SKIP (no SSH)"
                 validations+=("{\"phase\": \"fio_datagen\", \"status\": \"SKIP\", \"message\": \"Skipped — SSH not available\"}")
+            elif [ "${expected_data_disks}" -le 1 ]; then
+                # D: is always reserved for HammerDB's own data file (see $ex=@("C","D")
+                # exclusion list below), so there is no "extra" disk left for FIO to fill
+                # when dataDisks<=1. This is a valid, intentional configuration (e.g. a
+                # HammerDB-only run) — not a failure.
+                echo "  [11/12] FIO data generation... SKIP (dataDisks=${expected_data_disks}, no extra disk beyond primary D: data disk)"
+                log_validation_checkpoint "fio_datagen" "SKIP" "No extra disks (dataDisks=${expected_data_disks})"
+                validations+=("{\"phase\": \"fio_datagen\", \"status\": \"SKIP\", \"message\": \"No extra disk beyond primary data disk D: (dataDisks=${expected_data_disks})\"}")
             else
                 echo "  [11/12] FIO data generation on extra disks..."
 
@@ -2326,7 +2334,7 @@ check_windows_vm() {
                         elif echo "${generate_output}" | grep -q "DATAGEN_NO_TARGET_DRIVES"; then
                             echo "    FAIL: No target drives found for FIO (only C: and D: present?)"
                             log_validation_checkpoint "fio_datagen" "FAIL" "No target drives for FIO"
-                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"No extra drives found (need dataDisks > 2)\"}")
+                            validations+=("{\"phase\": \"fio_datagen\", \"status\": \"FAIL\", \"message\": \"No extra drives found (need dataDisks > 1)\"}")
                             overall_status="FAILED"
                             fio_phase_failed="true"
                         else
